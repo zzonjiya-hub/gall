@@ -1,0 +1,3216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>KSMS 블록세상 v4(메타버스)</title>
+    <link rel="icon" type="image/x-icon" href="./icon.ico?v=4">
+    <!-- Tailwind CSS 및 FontAwesome 로드 (libs 폴더 로컬 파일 — 오프라인 구동 지원) -->
+    <script src="./libs/tailwind.js"></script>
+    <link rel="stylesheet" href="./libs/fontawesome/css/all.min.css">
+    <!-- Three.js 및 OrbitControls 로드 (로컬) -->
+    <script src="./libs/three.min.js"></script>
+    <script src="./libs/OrbitControls.js"></script>
+    <!-- 싱글플레이: 서버 없음 — socket.io 로드하지 않음 (가상 모드로 로컬 실행) -->
+    <style>
+        @import url('./libs/fonts/noto-sans-kr.css');
+        
+        html, body {
+            height: 100%;
+            height: -webkit-fill-available;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+        }
+        #game-container {
+            width: 100%;
+            height: 100%;
+            height: -webkit-fill-available;
+        }
+        
+        body {
+            font-family: 'Noto Sans KR', 'Noto Sans KR Latin', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        /* 단축바 슬롯 액티브 하이라이트 효과 */
+        /* 🌟 iPad 더블탭 확대 차단: 상단바는 manipulation(더블탭 줌만 제거, 슬라이더 드래그 유지) */
+        #top-bar, #top-bar * {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .hotbar-slot {
+            transition: all 0.15s ease;
+        }
+        .hotbar-slot.active {
+            border-color: #ffffff !important;
+            transform: scale(1.1);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+            z-index: 10;
+        }
+        /* 크롬 조절 슬라이더 커스텀 */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #f43f5e;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Noto Sans KR"', '"Noto Sans KR Latin"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="text-white overflow-hidden w-full fixed">
+
+<!-- 피격 오버레이 빨간색 화면 (투명도 30% 셀로판지 효과) -->
+<div id="damage-flash" class="fixed inset-0 pointer-events-none opacity-0 z-40" style="background-color: rgba(255, 0, 0, 0.3); transition: opacity 0.075s;"></div>
+
+<!-- 🌟 미디어블록 팝업 (쫀지 설정 + 일반 열람, 게임 디자인 적용) -->
+<div id="media-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 px-4">
+    <div id="media-shell" class="bg-[#111111] border-[6px] border-[#466d2e] rounded-2xl w-max max-w-[90vw] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+        <div id="media-kind-row" class="hidden px-4 pt-3 flex-shrink-0">
+            <div class="grid grid-cols-3 gap-1 bg-[#2b471b] p-1 rounded-lg text-sm font-bold">
+                <button id="media-kind-video" class="py-1.5 rounded-md transition-all">동영상</button>
+                <button id="media-kind-image" class="py-1.5 rounded-md transition-all">이미지</button>
+                <button id="media-kind-web" class="py-1.5 rounded-md transition-all">웹페이지</button>
+            </div>
+        </div>
+        <div id="media-editor-row" class="hidden px-4 pt-3 gap-2 flex-shrink-0">
+            <input id="media-url-input" type="text" inputmode="url" placeholder="유튜브·드라이브 영상 또는 이미지 링크 붙여넣기"
+                   class="flex-1 min-w-0 bg-[#3d6328] border-4 border-[#2b471b] rounded-lg px-3 py-2 text-white text-sm font-bold focus:outline-none focus:border-yellow-400 placeholder-white/50">
+            <button id="media-apply" class="flex-shrink-0 bg-[#fcd34d] hover:bg-[#fbbf24] text-orange-700 font-extrabold text-sm px-4 rounded-lg border-b-4 border-[#d97706] active:border-b-0 active:translate-y-0.5 transition-all">적용하기</button>
+        </div>
+        <div id="media-content" class="p-4 overflow-hidden min-h-0"></div>
+        <div id="media-bottom-bar" class="flex gap-2 px-4 pb-4 flex-shrink-0">
+            <button id="media-unlink" class="hidden flex-1 bg-red-700 hover:bg-red-600 text-white font-bold text-sm py-2 rounded-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-0.5 transition-all">연결 해제</button>
+        </div>
+    </div>
+</div>
+
+<!-- 🌟 토스트 알림창 (하단 중앙) -->
+<div id="toast" class="fixed bottom-20 left-1/2 transform -translate-x-1/2 z-50 bg-black/80 text-white text-sm font-bold px-4 py-2 rounded-lg transition-opacity duration-200 opacity-0 pointer-events-none">알림</div>
+
+<!-- 첫 화면: 게임 시작 대기 및 캐릭터명 설정 모달 -->
+<div id="setup-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-[#8bcbf9] px-4">
+    <div class="bg-[#59893d] border-[6px] border-[#466d2e] p-8 pb-4 rounded-2xl max-w-md w-full text-center shadow-2xl relative">
+        <div class="flex justify-start mb-7 gap-3 items-center">
+            <!-- 🌟 새 게임 아이콘 (icon.png) -->
+            <img src="./icon.png?v=4" width="55" height="55" class="border-4 border-[#2b471b]" style="border-radius: 18%;" alt="KSMS 아이콘">
+            <h1 class="text-2xl md:text-[34px] font-black tracking-wider text-yellow-300" style="-webkit-text-stroke: 8px #2b471b; paint-order: stroke fill;"><span style="color: #ffffff;">KSMS</span> 블록세상 <span style="color: #59893d;">v4</span></h1>
+        </div>
+        
+        <div class="mb-4 relative">
+            <div id="outfit-picker" class="grid grid-cols-6 gap-2">
+                <!-- 🌟 JS가 무지개 순서(빨·주·노·초·파·보)로 6종 의상 버튼을 주입 -->
+            </div>
+        </div>
+
+        <div class="mb-6 relative">
+            <div class="grid grid-cols-3 gap-2">
+                <input type="text" id="accesscode-input" placeholder="접속번호" maxlength="4" inputmode="numeric" autocomplete="off" autofocus
+                       class="bg-[#3d6328] border-4 border-[#2b471b] rounded-lg px-2 py-3 text-white text-lg font-bold text-center focus:outline-none focus:border-yellow-400 placeholder-white/60 transition-all shadow-inner">
+                <input type="text" id="username-input" placeholder="이름을 적어주세요" maxlength="12"
+                       class="col-span-2 bg-[#3d6328] border-4 border-[#2b471b] rounded-lg px-4 py-3 text-white text-lg font-bold text-center focus:outline-none focus:border-yellow-400 placeholder-white/60 transition-all shadow-inner">
+            </div>
+            <p id="error-msg" class="text-rose-200 text-xs font-bold mt-2 hidden"><i class="fa-solid fa-triangle-exclamation mr-1"></i>이름은 한글·영문·숫자만 입력해 주세요!</p>
+            <p id="code-error-msg" class="text-rose-200 text-xs font-bold mt-2 hidden"><i class="fa-solid fa-triangle-exclamation mr-1"></i>접속번호가 틀렸습니다. 다시 입력해 주세요!</p>
+        </div>
+        
+        <button id="start-btn" 
+                class="w-full bg-[#fcd34d] hover:bg-[#fbbf24] active:bg-[#f59e0b] text-orange-600 font-extrabold text-xl py-3.5 rounded-lg border-b-4 border-[#d97706] shadow-md active:border-b-0 active:translate-y-1 transition-all" style="border: 4px solid #92400e; border-bottom: 4px solid #d97706;">
+            블록세상 들어가기
+        </button>
+        <p class="text-center text-[11px] text-white/70 font-bold mt-4">© 2026 KSMS. All rights reserved.</p>
+    </div>
+</div>
+
+<div id="game-container" class="relative hidden">
+    <!-- 상단 붉은 핏빛 테마 제어 탑 바 -->
+    <div id="top-bar" class="absolute top-0 left-0 right-0 h-12 bg-[#210508]/90 border-b border-rose-900/40 flex items-center justify-between px-4 z-40 backdrop-blur-sm">
+        
+        <!-- 왼쪽 영역: 타이틀 및 뷰 줌 슬라이더 -->
+        <div class="flex items-center gap-4 flex-shrink-0">
+            <div class="text-white font-black tracking-wider text-sm flex items-center gap-2">
+                <img src="./icon.ico?v=4" width="22" height="22" class="rounded-sm flex-shrink-0" style="image-rendering: pixelated;" alt="KSMS 아이콘">
+                <span class="text-white font-black tracking-wider text-xs sm:text-sm whitespace-nowrap">KSMS 블록세상 v4</span>
+            </div>
+
+            <!-- 화질 조절 (저/중/고): 클릭할 때마다 고 → 중 → 저 순서로 전환 -->
+            <button id="quality-btn" class="h-8 px-2 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center gap-1 border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="화질 조절: 클릭할 때마다 저 → 중 → 고 순서로 전환">
+                <i id="quality-icon" class="fa-solid fa-gauge-high text-sm"></i>
+                <span id="quality-label" class="text-xs font-bold">고</span>
+            </button>
+
+            <!-- 카메라 줌 슬라이더 조절 기어 -->
+            <div class="flex items-center gap-1.5 bg-rose-950/40 border border-rose-900/30 rounded-full px-3 py-1 pointer-events-auto text-rose-300">
+                <i class="fa-solid fa-minus text-xs" title="축소"></i>
+                <input id="zoom-slider" type="range" min="4" max="15" step="0.1" value="9.5" class="w-16 sm:w-28 accent-rose-500 bg-rose-950 h-1 rounded-lg appearance-none cursor-pointer">
+                <i class="fa-solid fa-plus text-xs" title="확대"></i>
+            </div>
+        </div>
+        
+        <!-- 중앙 영역: 1인칭/3인칭 시점 전환 버튼 + 투명인간 버튼 (쫀지 전용) -->
+        <div class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center gap-2">
+            <button id="view-toggle-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="1인칭/3인칭 시점 전환">
+                <i id="view-toggle-icon" class="fa-solid fa-eye text-sm"></i>
+            </button>
+            <button id="ghost-toggle-btn" class="hidden w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="투명인간 모드 (블록 통과)">
+                <i id="ghost-toggle-icon" class="fa-solid fa-ghost text-sm"></i>
+            </button>
+            <button id="summon-all-btn" class="hidden w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="전체 소환 (모든 접속자를 내 위치로)">
+                <i class="fa-solid fa-magnet text-sm"></i>
+            </button>
+            <button id="freeze-all-btn" class="hidden w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="전체 동결 (모든 접속자 조종 불가)">
+                <i class="fa-solid fa-snowflake text-sm"></i>
+            </button>
+        </div>
+
+        <!-- 오른쪽 영역: 유틸리티 기능 제어부 -->
+        <div class="flex items-center gap-2 flex-shrink-0">
+            <input type="file" id="file-input" class="hidden" accept=".블록세상,.ksms">
+            
+            <!-- 쫀지모드 전용 4가지 실행옵션 컨트롤바 -->
+            <div id="admin-mode-controls" class="hidden items-center gap-1.5 flex-shrink-0 bg-rose-950/40 p-1 rounded-lg border border-rose-900/30 mr-2">
+                <button class="admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all" data-mode="ATTACK" title="공격 모드 (PvP, 블록, 중력)"><i class="fa-solid fa-skull text-xs"></i></button>
+                <button class="admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all" data-mode="SAFE" title="안전 모드 (관전 모드)"><i class="fa-solid fa-shield-halved text-xs"></i></button>
+                <button class="admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all" data-mode="GRAVITY" title="중력 모드 (블록 설치, 중력)"><i class="fa-solid fa-cube text-xs"></i></button>
+                <button class="admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all" data-mode="FLIGHT" title="비행 모드 (자유 비행, 블록 설치)"><i class="fa-solid fa-dove text-xs"></i></button>
+            </div>
+
+            <button id="save-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 hidden items-center justify-center border border-rose-900/30 text-rose-200 transition-colors pointer-events-auto shadow-md" title="블록 저장">
+                <i class="fa-solid fa-download text-sm"></i>
+            </button>
+            <button id="load-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 hidden items-center justify-center border border-rose-900/30 text-rose-200 transition-colors pointer-events-auto shadow-md" title="블록 로드">
+                <i class="fa-solid fa-folder-open text-sm"></i>
+            </button>
+            <button id="capture-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="화면 캡처">
+                <i class="fa-solid fa-camera text-sm"></i>
+            </button>
+            <button id="photo-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="새 창에서 이미지 열기">
+                <i class="fa-solid fa-image text-sm"></i>
+            </button>
+            <button id="fullscreen-btn" class="w-8 h-8 rounded bg-rose-950/40 hover:bg-rose-900/60 flex items-center justify-center border border-rose-900/30 text-rose-200 transition-colors shadow-md pointer-events-auto" title="전체화면">
+                <i class="fa-solid fa-expand text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- WebGL Canvas -->
+    <canvas id="game-canvas" class="absolute inset-0 w-full h-full block"></canvas>
+
+    <!-- 좌하단 모바일 전용 방향 가상 조이스틱 -->
+    <div class="absolute bottom-[33%] left-12 z-20 pointer-events-auto block touch-none">
+        <div id="mobile-joystick" class="w-32 h-32 bg-slate-850/40 border-4 border-slate-600/60 rounded-xl relative flex items-center justify-center backdrop-blur-xs shadow-xl">
+            <div class="absolute w-12 h-12 bg-slate-500/30 border border-slate-400/40 rounded-md"></div>
+            <div id="joystick-knob" class="w-14 h-14 bg-slate-300/65 border-2 border-white/80 rounded-lg absolute transition-all duration-75 shadow-lg flex items-center justify-center">
+                <div class="w-6 h-6 bg-slate-500/80 rounded-xs"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 우하단 모바일 점프 & 기어가기 컨트롤 허브 -->
+    <div class="absolute bottom-[33%] right-12 z-20 flex flex-col gap-3.5 items-center touch-none pointer-events-auto">
+        <button id="mobile-jump-btn" class="w-16 h-16 bg-slate-850/40 border-4 border-slate-600/60 rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all select-none" title="점프">
+            <i class="fa-solid fa-arrow-up text-xl text-white/80"></i>
+        </button>
+        <button id="mobile-crouch-btn" class="w-16 h-16 bg-slate-850/40 border-4 border-slate-600/60 rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all select-none" title="기어가기">
+            <i class="fa-solid fa-arrow-down text-xl text-white/80"></i>
+        </button>
+    </div>
+
+    <!-- 하단 블록 단축바 영역 -->
+    <div id="hotbar-wrapper" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-30 w-[95%] max-w-3xl px-2 hidden">
+        <div id="hotbar-container" class="bg-slate-850/40 border-4 border-slate-600/60 rounded-xl p-1.5 flex items-center gap-1 shadow-2xl backdrop-blur-xs overflow-hidden pointer-events-auto">
+            <!-- 11가지 색의 블록 슬롯 + 지우개 슬롯 -->
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="0" data-type="block" data-value="#FF0000" title="빨간색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #FF0000;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="1" data-type="block" data-value="#FFA500" title="오렌지색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #FFA500;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="2" data-type="block" data-value="#FFFF00" title="노란색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #FFFF00;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="3" data-type="block" data-value="#008000" title="초록색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #008000;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="4" data-type="block" data-value="#0000FF" title="파란색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #0000FF;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="5" data-type="block" data-value="#800080" title="보라색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #800080;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="6" data-type="block" data-value="#8B4512" title="갈색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #8B4512;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="7" data-type="block" data-value="#FFFFFF" title="흰색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner border border-slate-300" style="background-color: #FFFFFF;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="8" data-type="block" data-value="#808080" title="회색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #808080;"></span>
+            </button>
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="9" data-type="block" data-value="#222222" title="검정색 블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner" style="background-color: #222222;"></span>
+            </button>
+            <!-- 큐브블록 (쫀지모드 전용 설치, 밟으면 접속자 전원 퇴장) -->
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="10" data-type="block" data-value="#FFC0CB" title="큐브블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner border border-slate-400/70 overflow-hidden">
+                    <svg class="w-full h-full block" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect width="32" height="32" fill="#1c1c1c"/>
+                        <rect x="1" y="1" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="11" y="1" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="21" y="1" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="1" y="11" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="11" y="11" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="21" y="11" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="1" y="21" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="11" y="21" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                        <rect x="21" y="21" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+                    </svg>
+                </span>
+            </button>
+            
+            <!-- 미디어블록 (쫀지모드 전용 설치, 터치하면 등록된 영상·이미지 표시) -->
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95" data-index="11" data-type="block" data-value="#16213A" title="미디어블록">
+                <span class="w-[72%] h-[72%] rounded shadow-inner overflow-hidden">
+                    <svg class="w-full h-full block" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect width="32" height="32" fill="#1c1c1c"/>
+                        <rect x="2" y="2" width="13" height="13" rx="2" fill="#FFFFFF"/>
+                        <rect x="17" y="2" width="13" height="13" rx="2" fill="#FFFFFF"/>
+                        <rect x="2" y="17" width="13" height="13" rx="2" fill="#FFFFFF"/>
+                        <rect x="17" y="17" width="13" height="13" rx="2" fill="#FFFFFF"/>
+                    </svg>
+                </span>
+            </button>
+            
+            <button class="hotbar-slot flex-1 min-w-0 aspect-square rounded-lg border-2 border-slate-600/40 bg-slate-800/10 flex items-center justify-center active:scale-95 relative" data-index="12" data-type="eraser" title="블록 삭제">
+                <span class="w-[72%] h-[72%] rounded border-[3px] border-red-500 relative overflow-hidden" style="background-color: transparent;">
+                    <div class="absolute inset-0 bg-red-500 w-[3px] h-[150%] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-45 shadow-sm"></div>
+                </span>
+            </button>
+        </div>
+        <p class="text-center text-[10px] text-white/50 font-bold mt-1 pointer-events-none">© 2026 KSMS. All rights reserved.</p>
+    </div>
+</div>
+
+<script>
+// 페이지 진입 시 접속번호 입력창 자동 포커스 + 의상 선택 버튼 생성
+window.addEventListener('DOMContentLoaded', () => {
+    initOutfitPicker();
+    const input = document.getElementById('accesscode-input') || document.getElementById('username-input');
+    if (input) input.focus();
+});
+
+let isVirtualMode = false;
+if (typeof io === 'undefined') {
+    isVirtualMode = true;
+    window.io = function() {
+        const virtualCallbacks = {};
+        const stub = {
+            emit: function(event, data) {
+                if (event === 'block-change' && virtualCallbacks['block-changed']) {
+                    virtualCallbacks['block-changed'](data);
+                }
+            },
+            on: function(event, callback) {
+                virtualCallbacks[event] = callback;
+                if (event === 'init-state') {
+                    setTimeout(() => { callback({ blocks: {}, players: {}, globalMode: 'SAFE' }); }, 300);
+                }
+            }
+        };
+        stub.io = { on: function() {} };
+        return stub;
+    };
+}
+
+// 🌟 [연결 안정화] 학교 와이파이·프록시 환경 대응:
+// 웹소켓 강제를 해제하고 기본 전송 경로(폴링→웹소켓 자동 업그레이드)로 복귀 —
+// 웹소켓이 중간에 끊긴 뒤 프록시가 재연결을 막으면 모든 플레이어가 "멈춤/안 보임" 상태가 되는 문제 차단
+const socket = io({
+    reconnectionDelayMax: 2000, // 끊기면 최대 2초 간격으로 빠르게 재연결 시도
+    timeout: 20000
+});
+
+// 🌟 [재연결 복구] 연결 상태 표시기
+let connIndicator = null;
+function showConnIndicator(text) {
+    if (!connIndicator) {
+        connIndicator = document.createElement('div');
+        connIndicator.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:150;background:rgba(185,28,28,0.9);color:#fff;font-size:13px;font-weight:bold;padding:8px 16px;border-radius:10px;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+        document.body.appendChild(connIndicator);
+    }
+    connIndicator.textContent = text;
+    connIndicator.style.display = 'block';
+}
+function hideConnIndicator() { if (connIndicator) connIndicator.style.display = 'none'; }
+
+// 🌟 [재연결 복구] 재입장 정보 (join-player 재전송용)
+let hasJoined = false;
+let joinedName = null, joinedIsEasterEgg = false, joinedOutfitId = null;
+let joinedCode = null; // 🌟 접속번호 (재연결 재입장에도 함께 전송)
+try {
+    const savedCode = localStorage.getItem('ksmsAccessCode');
+    if (savedCode) joinedCode = savedCode;
+} catch (e) {}
+let isReconnectRestore = false;
+
+socket.io.on('reconnect', () => {
+    hideConnIndicator();
+    // 새로고침 없이 소켓이 끊겼다 다시 연결되면: 서버는 이 연결을 "미입장"으로 보므로 자동 재입장
+    // (재입장 토큰으로 위치·좀비·생명·의상 상태가 복원되고, 이후 이동 패킷으로 현재 위치가 즉시 반영됨)
+    if (hasJoined && joinedName) {
+        isReconnectRestore = true;
+        joinPositioned = false; // 새 입장 확정 전까지 방송 중단
+        socket.emit('join-player', { name: joinedName, isEasterEgg: joinedIsEasterEgg, token: playerToken, outfit: joinedOutfitId, code: joinedCode });
+    }
+});
+socket.on('disconnect', () => {
+    showConnIndicator('연결 끊김 — 자동 재연결 중...');
+});
+
+// 화질 3단계(저/중/고) 제어: 안드로이드는 기본 '중'(그림자 OFF + 해상도 1.5배 캡), 그 외 기기는 '고'
+// 주의: 안티앨리어싱은 렌더러 생성 시점에 결정되므로 기기 기본값을 따름
+const isAndroidDevice = /android/i.test(navigator.userAgent);
+const defaultQuality = isAndroidDevice ? 'LOW' : 'HIGH'; // 🌟 안드로이드는 기본 '저' (발열·저가 GPU 대응) — 그 외 기기는 '고'. 중/저는 화질 버튼으로 개인 선택
+let currentQuality = defaultQuality;
+try {
+    const savedQuality = localStorage.getItem('ksms-quality');
+    if (savedQuality === 'LOW' || savedQuality === 'MID' || savedQuality === 'HIGH') currentQuality = savedQuality;
+} catch (e) {}
+const QUALITY_LABELS = { LOW: '저', MID: '중', HIGH: '고' };
+const QUALITY_ICONS = { LOW: 'fa-gauge-simple', MID: 'fa-gauge', HIGH: 'fa-gauge-high' };
+
+function qualityPixelRatio(q) {
+    const cap = (q === 'HIGH') ? 2 : (q === 'MID' ? 1.5 : 1.0);
+    return Math.min(window.devicePixelRatio || 1, cap);
+}
+
+// 🌟 [C안 ①] 화질별 시야 거리(카메라 far)·안개 농도 — 저화질일수록 좁고 짙게 하여 GPU 부하 절감
+function qualityViewDistance(q) {
+    return (q === 'HIGH') ? 200 : (q === 'MID' ? 130 : 85);
+}
+function qualityFogDensity(q) {
+    return (q === 'HIGH') ? 0.012 : (q === 'MID' ? 0.016 : 0.024);
+}
+
+function applyQuality(q) {
+    currentQuality = q;
+    try { localStorage.setItem('ksms-quality', q); } catch (e) {}
+    if (renderer && camera) {
+        renderer.setPixelRatio(qualityPixelRatio(q));
+        // 🌟 [C안 ①] 화질별 시야 거리·안개 적용 (안개가 지평선을 가려 원거리 절단이 티 나지 않음)
+        camera.far = qualityViewDistance(q);
+        camera.updateProjectionMatrix();
+        if (scene.fog) scene.fog.density = qualityFogDensity(q);
+        onWindowResize();
+    }
+    if (sunLight) {
+        const shadowsOn = (q === 'HIGH');
+        sunLight.castShadow = shadowsOn;
+        if (renderer) renderer.shadowMap.enabled = shadowsOn;
+        scene.traverse((obj) => {
+            if (obj.material) {
+                (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => { m.needsUpdate = true; });
+            }
+        });
+    }
+    const qIcon = document.getElementById('quality-icon');
+    const qLabel = document.getElementById('quality-label');
+    if (qIcon && qLabel) {
+        qIcon.className = `fa-solid ${QUALITY_ICONS[q]} text-sm`;
+        qLabel.innerText = QUALITY_LABELS[q];
+    }
+}
+
+const WIDTH = 120;
+const DEPTH = 120;
+const HEIGHT = 60;
+const MAP_SIZE = WIDTH * DEPTH * HEIGHT;
+const HALF_WIDTH = WIDTH / 2;
+const HALF_DEPTH = DEPTH / 2;
+const FLOOR_SIZE = 120;
+
+const worldData = new Uint8Array(MAP_SIZE);
+
+const colorPalette = [
+    "#000000", "#FF0000", "#FFA500", "#FFFF00", "#008000", "#0000FF",
+    "#800080", "#8B4512", "#FFFFFF", "#808080", "#222222", "#FFC0CB", "#16213A"
+];
+
+let globalMode = 'SAFE'; // 메타버스: 안전모드 고정 (걷기+보기 전용) 
+let freezeAll = false; // 🌟 전체 동결 상태 (쫀지 동결 버튼 토글 — 동결 중 일반 접속자 조종 불가, 쫀지는 항상 이동 가능)
+
+class SoundEffects {
+    constructor() { this.ctx = null; }
+    init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    playPlace() {
+        this.init(); if (!this.ctx) return;
+        let osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.type = 'triangle'; osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.15);
+    }
+    playBreak() {
+        this.init(); if (!this.ctx) return;
+        let bufferSize = this.ctx.sampleRate * 0.1;
+        let buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        let data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        let noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+        let filter = this.ctx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 180;
+        let gain = this.ctx.createGain(); gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+        noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+        noise.start(); noise.stop(this.ctx.currentTime + 0.1);
+    }
+    playHit() {
+        this.init(); if (!this.ctx) return;
+        let osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.type = 'triangle'; 
+        osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(15, this.ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.12);
+    }
+    playCelebration() {
+        this.init(); if (!this.ctx) return;
+        const notes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, index) => {
+            setTimeout(() => {
+                let osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.type = 'sine'; 
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                osc.start(); osc.stop(this.ctx.currentTime + 0.4);
+            }, index * 100);
+        });
+    }
+}
+const sfx = new SoundEffects();
+
+let scene, camera, renderer, controls;
+let characterGroup;
+let steveName = "Steve";
+let floorMesh;
+let sunLight;
+
+let isEngineInitialized = false;
+// 🌟 월드 준비 게이트: init-state 월드 적용+첫 탈출 전에는 위치 방송 금지 (신입 파묻힘 방송 차단)
+let worldReady = false;
+let initStateSeen = false;
+let worldReadyTimer = null;
+// 🌟 입장 확정 플래그: join-accepted로 위치가 확정되기 전에는 어떤 위치 패킷도 송신 금지
+//    (엔진 초기화 직후 lift가 기본값 (0,?,0)을 방송해 서버 기록을 스폰으로 오염시키는 것 차단)
+let joinPositioned = false;
+function markWorldReady() {
+    if (!initStateSeen) return;
+    if (!worldReady) {
+        worldReady = true;
+        if (worldReadyTimer) { clearTimeout(worldReadyTimer); worldReadyTimer = null; }
+    }
+    liftCharacterOutOfBlocks(); // 확정 좌표로 탈출 후 lift:true 즉시 방송 (함수 내 worldReady 게이트 통과)
+}
+let cubeBlockGroup = null, cubeBlockGeo = null, rubikFaceMaterials = null; // 큐브블록(11번) 전용 렌더링 자원
+let mediaBlockGroup = null, mediaFaceMaterials = null; // 미디어블록(12번) 전용 렌더링 자원 (큐브와 같은 6면 색배치)
+let initialPlayerData = null;
+let myIsZombie = false; // 🌟 내가 좀비화되었는지 (생명 0 → 퇴장 대신 좀비)
+
+// 🌟 재입장 세션: 같은 기기 토큰을 서버에 전달해 새로고침 시 위치·생명·좀비 상태 그대로 복구
+let playerToken = null;
+try {
+    playerToken = localStorage.getItem('ksmsPlayerToken');
+    if (!playerToken) {
+        playerToken = 'tk' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem('ksmsPlayerToken', playerToken);
+    }
+} catch (e) { playerToken = 'tk' + Date.now().toString(36); }
+
+let isEasterEgg = false;
+const remotePlayers = new Map();
+
+// 🌟 의상 6종 (무지개 순서: 빨·주·노·초·파·보) — 티셔츠(몸통+소매)와 바지 색. 기본값은 기존 일반 의상인 '하늘'
+const OUTFITS = [
+    { id: 'red',    label: '빨강', shirt: '#E53935', pants: '#ECEFF1' },
+    { id: 'orange', label: '주황', shirt: '#FB8C00', pants: '#5D4037' },
+    { id: 'yellow', label: '노랑', shirt: '#FDD835', pants: '#283593' },
+    { id: 'mint',   label: '초록', shirt: '#00E676', pants: '#1A237E' },
+    { id: 'cyan',   label: '하늘', shirt: '#00CBC9', pants: '#3C4FA5' },
+    { id: 'purple', label: '보라', shirt: '#9C27B0', pants: '#D7CCC8' },
+];
+const DEFAULT_OUTFIT_ID = 'cyan';
+function outfitById(id) {
+    return OUTFITS.find(o => o.id === id) || OUTFITS.find(o => o.id === DEFAULT_OUTFIT_ID);
+}
+let selectedOutfitId = DEFAULT_OUTFIT_ID;
+try {
+    const savedOutfit = localStorage.getItem('ksmsOutfit');
+    if (savedOutfit && OUTFITS.some(o => o.id === savedOutfit)) selectedOutfitId = savedOutfit;
+} catch (e) {}
+
+// 🌟 입장 화면 의상 선택 버튼 생성 (티셔츠/바지 2단 스와치 + 선택 하이라이트)
+function initOutfitPicker() {
+    const picker = document.getElementById('outfit-picker');
+    if (!picker) return;
+    picker.innerHTML = '';
+    OUTFITS.forEach(o => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.outfit = o.id;
+        btn.title = o.label;
+        btn.className = 'outfit-btn rounded-lg border-4 p-1 transition-all flex flex-col gap-1 bg-[#3d6328] border-[#2b471b] hover:border-yellow-400 active:scale-95 aspect-square';
+        btn.innerHTML =
+            `<span class="w-full flex-1 rounded-sm shadow-inner" style="background-color:${o.shirt};"></span>` +
+            `<span class="w-full flex-1 rounded-sm shadow-inner" style="background-color:${o.pants};"></span>`;
+        btn.addEventListener('click', () => selectOutfit(o.id));
+        picker.appendChild(btn);
+    });
+    refreshOutfitPicker();
+}
+function selectOutfit(id) {
+    selectedOutfitId = outfitById(id).id;
+    try { localStorage.setItem('ksmsOutfit', selectedOutfitId); } catch (e) {}
+    refreshOutfitPicker();
+}
+function refreshOutfitPicker() {
+    document.querySelectorAll('#outfit-picker .outfit-btn').forEach(b => {
+        if (b.dataset.outfit === selectedOutfitId) {
+            b.classList.remove('border-[#2b471b]');
+            b.classList.add('border-yellow-400', 'scale-110', 'shadow-[0_0_12px_rgba(250,204,21,0.8)]');
+        } else {
+            b.classList.add('border-[#2b471b]');
+            b.classList.remove('border-yellow-400', 'scale-110', 'shadow-[0_0_12px_rgba(250,204,21,0.8)]');
+        }
+    });
+}
+
+let selectedToolType = "block";
+let selectedColor = "#FF0000";
+let activeHotbarIndex = 0;
+
+let isFirstPerson = false;
+// 🌟 쫀지 전용 투명인간 모드 (블록 통과)
+let ghostMode = false;
+
+// 🌟 간단한 토스트 알림 함수
+function showToast(msg) {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.classList.remove('opacity-0');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toast.classList.add('opacity-0'), 2000);
+}
+
+// ==========================================
+// 🌟 미디어블록(12번): 쫀지 설정 + 일반 열람 (안전모드·5칸·시야)
+// ==========================================
+let mediaInfo = {}; // 블록인덱스 → {url, kind(youtube|video|image)}
+let currentMediaIdx = -1;
+let currentMediaKindPick = 'video'; // 쫀지의 직접 선택 (동영상|이미지)
+
+// 링크 → {kind, url(임베드용)} 변환. 지원 불가면 null
+function parseMediaUrl(raw) {
+    if (!raw) return null;
+    let u = String(raw).trim();
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    let host = '', pathq = '';
+    try {
+        const p = new URL(u);
+        if (p.protocol !== 'http:' && p.protocol !== 'https:') return null;
+        host = p.hostname.toLowerCase();
+        pathq = p.pathname + p.search;
+    } catch (e) { return null; }
+    if (host.indexOf('.') < 0) return null;
+    let m;
+    // 유튜브: watch / embed / shorts / live / youtu.be → 임베드 주소
+    if (host.indexOf('youtube.com') >= 0 || host === 'youtu.be' || host === 'm.youtube.com') {
+        m = u.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
+        if (m) return { kind: 'youtube', url: 'https://www.youtube.com/embed/' + m[1] };
+        return null;
+    }
+    // 구글 드라이브 영상: 공유 링크 → 미리보기 주소
+    m = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/i) || u.match(/drive\.google\.com\/open\?[^#]*\bid=([\w-]+)/i);
+    if (m) return { kind: 'video', url: 'https://drive.google.com/file/d/' + m[1] + '/preview' };
+    // 구글 드라이브 이미지: 썸네일 주소로 변환
+    m = u.match(/drive\.google\.com\/uc\?[^#]*\bid=([\w-]+)/i);
+    if (m) return { kind: 'image', url: 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w1600' };
+    // 직접 동영상 / 이미지 파일
+    if (/\.(mp4|webm|ogg|mov)(\?|#|$)/i.test(pathq)) return { kind: 'video', url: u };
+    if (/\.(jpe?g|png|gif|webp|bmp|svg)(\?|#|$)/i.test(pathq)) return { kind: 'image', url: u };
+    return null;
+}
+
+function isSafeMediaInfo(info) {
+    if (!info || typeof info !== 'object') return false;
+    if (info.kind === 'text') return typeof info.text === 'string' && info.text.length > 0 && info.text.length <= 500;
+    return (info.kind === 'youtube' || info.kind === 'video' || info.kind === 'image' || info.kind === 'web')
+        && typeof info.url === 'string' && /^https?:\/\//i.test(info.url) && info.url.length <= 2000;
+}
+
+// 🌟 미디어 정제 복사 (동기화·저장 시 텍스트 필드 보존, 변조 필드 제거)
+function cleanMediaInfo(info) {
+    if (!info || typeof info !== 'object') return null;
+    if (info.kind === 'text') {
+        if (typeof info.text !== 'string' || !info.text.length || info.text.length > 500) return null;
+        return { kind: 'text', text: info.text };
+    }
+    if ((info.kind === 'youtube' || info.kind === 'video' || info.kind === 'image' || info.kind === 'web')
+        && typeof info.url === 'string' && /^https?:\/\//i.test(info.url) && info.url.length <= 2000) {
+        return { url: info.url, kind: info.kind };
+    }
+    return null;
+}
+
+// 링크 + 직접 선택한 종류 → {kind, url} 변환. 불가면 {error} 또는 null
+function normalizeMediaByKind(raw, pick) {
+    if (!raw) return null;
+    let u = String(raw).trim();
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    let host = '', pathq = '';
+    try {
+        const p = new URL(u);
+        if (p.protocol !== 'http:' && p.protocol !== 'https:') return null;
+        host = p.hostname.toLowerCase();
+        pathq = p.pathname + p.search;
+    } catch (e) { return null; }
+    if (host.indexOf('.') < 0) return null;
+    const isYtHost = host.indexOf('youtube.com') >= 0 || host === 'youtu.be' || host === 'm.youtube.com';
+    const yt = u.match(/(?:youtube\.com\/(?:watch\?[^#]*v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{6,})/i);
+    const driveFile = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/i) || u.match(/drive\.google\.com\/open\?[^#]*\bid=([\w-]+)/i);
+    const driveUc = u.match(/drive\.google\.com\/uc\?[^#]*\bid=([\w-]+)/i);
+    const isImgExt = /\.(jpe?g|png|gif|webp|bmp|svg)(\?|#|$)/i.test(pathq);
+    const isVidExt = /\.(mp4|webm|ogg|mov)(\?|#|$)/i.test(pathq);
+    if (pick === 'web') {
+        // 🌟 웹페이지는 주소 그대로 (단, 유튜브는 임베드로 바꿔야 표시됨)
+        if (isYtHost) {
+            if (yt) return { kind: 'youtube', url: 'https://www.youtube.com/embed/' + yt[1] };
+            return null;
+        }
+        return { kind: 'web', url: u };
+    }
+    if (pick === 'image') {
+        if (isYtHost) return { error: 'yt' };
+        if (driveUc) return { kind: 'image', url: 'https://drive.google.com/thumbnail?id=' + driveUc[1] + '&sz=w1600' };
+        if (driveFile) return { kind: 'image', url: 'https://drive.google.com/thumbnail?id=' + driveFile[1] + '&sz=w1600' };
+        if (isImgExt) return { kind: 'image', url: u };
+        return null;
+    }
+    if (isYtHost) {
+        if (yt) return { kind: 'youtube', url: 'https://www.youtube.com/embed/' + yt[1] };
+        return null;
+    }
+    if (driveFile) return { kind: 'video', url: 'https://drive.google.com/file/d/' + driveFile[1] + '/preview' };
+    if (driveUc) return { kind: 'video', url: 'https://drive.google.com/file/d/' + driveUc[1] + '/preview' };
+    if (isVidExt) return { kind: 'video', url: u };
+    if (isImgExt) return { error: 'img' };
+    return null;
+}
+
+function refreshMediaKindPick() {
+    const v = document.getElementById('media-kind-video');
+    const im = document.getElementById('media-kind-image');
+    const w = document.getElementById('media-kind-web');
+    const on = 'py-1.5 rounded-md transition-all bg-[#fcd34d] text-orange-700 shadow-sm';
+    const off = 'py-1.5 rounded-md transition-all text-white/70 hover:text-white';
+    if (v) v.className = (currentMediaKindPick === 'video') ? on : off;
+    if (im) im.className = (currentMediaKindPick === 'image') ? on : off;
+    if (w) w.className = (currentMediaKindPick === 'web') ? on : off;
+}
+
+// 🌟 미디어 종류별 테두리 색: 동영상 빨강·이미지 파랑·웹페이지 노랑·텍스트 초록
+const MEDIA_BORDER_COLORS = { youtube: '#e53935', video: '#e53935', image: '#1e88e5', web: '#fdd835', text: '#00e676' };
+function setMediaBorder(kind) {
+    const shell = document.getElementById('media-shell');
+    if (!shell) return;
+    shell.style.borderColor = MEDIA_BORDER_COLORS[kind] || '#466d2e';
+}
+
+function setMediaContent(info) {
+    const box = document.getElementById('media-content');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!isSafeMediaInfo(info)) {
+        const p = document.createElement('p');
+        p.className = 'text-white/80 text-sm font-bold text-center py-8';
+        p.textContent = '등록된 내용이 없습니다.';
+        box.appendChild(p);
+        return;
+    }
+    setMediaBorder(info.kind);
+    // 🌟 크롬 여백: 편집 모드(입력행 있음) 200, 열람 모드 100
+    const edRow = document.getElementById('media-editor-row');
+    const chromeH = (edRow && !edRow.classList.contains('hidden')) ? 200 : 100;
+    const maxBoxW = () => window.innerWidth * 0.9 - 100;
+    const maxBoxH = () => window.innerHeight * 0.9 - chromeH;
+    function fitMediaBox(el, iw, ih) {
+        if (!iw || !ih) return;
+        const s = Math.min(maxBoxW() / iw, maxBoxH() / ih);
+        el.style.width = Math.max(1, Math.floor(iw * s)) + 'px';
+        el.style.height = Math.max(1, Math.floor(ih * s)) + 'px';
+    }
+    if (info.kind === 'text') {
+        // 🌟 텍스트 열람: 60% 박스 + 박스에 맞게 글씨 자동 축소 (textContent만 사용 — XSS 불가)
+        const div = document.createElement('div');
+        div.textContent = info.text;
+        div.style.cssText = 'width:60vw;height:60vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:#fff;font-weight:800;line-height:1.5;border-radius:8px;background:#22331c;padding:24px;margin:0 auto;font-size:100px;';
+        box.appendChild(div);
+        let fs = 100, guard = 0;
+        while (div.scrollHeight > div.clientHeight && fs > 14 && guard++ < 50) {
+            fs -= 2;
+            div.style.fontSize = fs + 'px';
+        }
+        return;
+    }
+    if (info.kind === 'image') {
+        const img = document.createElement('img');
+        img.src = info.url;
+        img.alt = '미디어블록 이미지';
+        img.referrerPolicy = 'no-referrer';
+        img.style.cssText = 'object-fit:contain;border-radius:8px;background:#000;display:block;margin:0 auto;';
+        img.onload = () => fitMediaBox(img, img.naturalWidth, img.naturalHeight);
+        box.appendChild(img);
+    } else if (info.kind === 'youtube' || /drive\.google\.com/i.test(info.url)) {
+        const fr = document.createElement('iframe');
+        fr.src = info.url;
+        fr.title = '미디어블록 영상';
+        fr.allowFullscreen = true;
+        fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+        fr.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture');
+        // 🌟 동영상 팝업은 모두 16:9 고정 맞춤 (유튜브·드라이브)
+        fr.style.cssText = 'aspect-ratio:16/9;border:0;border-radius:8px;background:#000;display:block;';
+        fr.style.width = Math.floor(Math.min(maxBoxW(), maxBoxH() * 16 / 9)) + 'px';
+        box.appendChild(fr);
+    } else if (info.kind === 'web') {
+        const fr = document.createElement('iframe');
+        fr.src = info.url;
+        fr.title = '미디어블록 영상';
+        fr.allowFullscreen = true;
+        fr.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+        fr.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture');
+        // 🌟 웹페이지는 최대 박스
+        fr.style.cssText = 'border:0;border-radius:8px;background:#000;display:block;';
+        fr.style.width = Math.floor(maxBoxW()) + 'px';
+        fr.style.height = Math.floor(maxBoxH()) + 'px';
+        box.appendChild(fr);
+    } else {
+        const v = document.createElement('video');
+        v.src = info.url;
+        v.controls = true;
+        v.playsInline = true;
+        v.preload = 'metadata';
+        v.style.cssText = 'object-fit:contain;border-radius:8px;background:#000;display:block;margin:0 auto;';
+        // 🌟 직접 동영상 파일도 16:9 고정 맞춤
+        v.onloadedmetadata = () => {
+            const w = Math.min(maxBoxW(), maxBoxH() * 16 / 9);
+            v.style.width = Math.floor(w) + 'px';
+            v.style.height = Math.floor(w * 9 / 16) + 'px';
+        };
+        box.appendChild(v);
+    }
+}
+
+function refreshMediaModal() {
+    const modal = document.getElementById('media-modal');
+    if (!modal || currentMediaIdx < 0) return;
+    const info = mediaInfo[currentMediaIdx];
+    setMediaContent(info);
+}
+
+function openMediaShell(editorMode) {
+    const row = document.getElementById('media-editor-row');
+    row.classList.toggle('hidden', !editorMode);
+    row.classList.toggle('flex', !!editorMode);
+    const kindRow = document.getElementById('media-kind-row');
+    if (kindRow) {
+        kindRow.classList.toggle('hidden', !editorMode);
+        kindRow.classList.toggle('block', !!editorMode);
+    }
+    document.getElementById('media-unlink').classList.toggle('hidden', !editorMode);
+    // 🌟 열람 모드에서는 하단 바 전체 숨김 (닫기는 우측 상단 ✕만)
+    document.getElementById('media-bottom-bar').style.display = editorMode ? '' : 'none';
+    const modal = document.getElementById('media-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+// 쫀지: 미디어블록 링크 설정 팝업 (종류는 직접 선택값을 우선, 저장된 값으로 preselect)
+function openMediaEditor(idx) {
+    currentMediaIdx = idx;
+    const info = mediaInfo[idx];
+    const input = document.getElementById('media-url-input');
+    input.value = (info && info.url) ? info.url : '';
+    if (info && info.kind === 'image') {
+        currentMediaKindPick = 'image';
+    } else if (info && info.kind === 'web') {
+        currentMediaKindPick = 'web';
+    } else if (info && (info.kind === 'youtube' || info.kind === 'video')) {
+        currentMediaKindPick = 'video';
+    } else {
+        const guess = parseMediaUrl(input.value);
+        currentMediaKindPick = (guess && guess.kind === 'image') ? 'image' : 'video';
+    }
+    refreshMediaKindPick();
+    openMediaShell(true);
+    refreshMediaModal();
+    setTimeout(() => { try { input.focus(); } catch (e) {} }, 50);
+}
+
+// 일반: 미디어블록 열람 팝업 (안전모드에서만 호출됨)
+function openMediaViewer(idx) {
+    currentMediaIdx = idx;
+    openMediaShell(false);
+    refreshMediaModal();
+}
+
+// 🌟 미디어 팝업 열림 여부 (열려 있으면 캐릭터 입력·물리 정지)
+function isMediaModalOpen() {
+    const modal = document.getElementById('media-modal');
+    return !!modal && !modal.classList.contains('hidden');
+}
+
+function closeMediaModal() {
+    if (!isMediaModalOpen()) return;
+    const modal = document.getElementById('media-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    const box = document.getElementById('media-content');
+    if (box) box.innerHTML = ''; // iframe 제거 → 영상 재생 중단
+    currentMediaIdx = -1;
+}
+
+function applyMediaFromInput() {
+    if (currentMediaIdx < 0) return;
+    const input = document.getElementById('media-url-input');
+    const parsed = normalizeMediaByKind(input ? input.value : '', currentMediaKindPick);
+    if (!parsed || parsed.error) {
+        const code = parsed && parsed.error;
+        showToast(code === 'yt' ? '유튜브 주소는 동영상으로 선택하세요'
+            : code === 'img' ? '이미지 파일은 이미지로 선택하세요'
+            : '지원하지 않는 링크입니다 (유튜브·드라이브·이미지)');
+        return;
+    }
+    mediaInfo[currentMediaIdx] = parsed; // 낙관적 반영 (서버 방송으로 확정)
+    socket.emit('media-set', { index: currentMediaIdx, url: parsed.url, kind: parsed.kind });
+    refreshMediaModal();
+    showToast('미디어를 등록했습니다');
+}
+
+function unlinkCurrentMedia() {
+    if (currentMediaIdx < 0) return;
+    delete mediaInfo[currentMediaIdx];
+    socket.emit('media-remove', { index: currentMediaIdx });
+    const input = document.getElementById('media-url-input');
+    if (input) input.value = '';
+    refreshMediaModal();
+    showToast('연결을 해제했습니다');
+}
+
+const tmpMediaEye = new THREE.Vector3(), tmpMediaTarget = new THREE.Vector3(), tmpMediaDir = new THREE.Vector3(), tmpMediaMat = new THREE.Matrix4();
+// 🌟 미디어블록 터치 우선 처리 — true면 handleInteract 나머지 흐름 생략
+//    쫀지: 미디어 도구로 터치 → 설정 / 지우개·다른 도구 → 기존 흐름
+//    일반: 지우개 → 불가 토스트 / 안전모드+5칸+시야 통과 → 열람
+function tryMediaTouch() {
+    raycaster.setFromCamera(mouse, camera);
+    const targets = [floorMesh];
+    for (let c = 1; c <= 11; c++) { if (instancedMeshes[c]) targets.push(instancedMeshes[c]); }
+    if (cubeBlockGroup) targets.push(cubeBlockGroup);
+    if (mediaBlockGroup) targets.push(mediaBlockGroup);
+    const hits = raycaster.intersectObjects(targets, true);
+    if (!hits.length) return false;
+    const hit = hits[0];
+    // 🌟 미디어블록(개별 메시)은 userData.worldIdx로 칸 역추적 (큐브블록과 동일 방식)
+    if (!(mediaBlockGroup && hit.object.parent === mediaBlockGroup)) return false;
+    const idx = hit.object.userData.worldIdx;
+    if (idx === undefined || worldData[idx] !== 12) return false;
+    tmpMediaTarget.copy(hit.object.position);
+
+    if (isEasterEgg) {
+        if (selectedToolType === 'eraser') return false; // 삭제 흐름 + 링크 정리
+        if (activeHotbarIndex === 11) { openMediaEditor(idx); return true; } // 미디어 도구 → 설정
+        return false; // 다른 블록 도구 → 인접 칸 설치 흐름
+    }
+    if (selectedToolType === 'eraser') { showToast('미디어블록은 삭제할 수 없습니다!'); return true; }
+    if (globalMode !== 'SAFE' || freezeAll) return false; // 안전모드에서만 열람 (좀비 포함)
+    const eyeY = charPhysics.position.y + (charPhysics.isCrawling ? 0.5 : 1.5);
+    tmpMediaEye.set(charPhysics.position.x, eyeY, charPhysics.position.z);
+    const dist = tmpMediaEye.distanceTo(tmpMediaTarget);
+    if (dist > 5.0) { showToast('5칸 이내에서 터치하세요'); return true; }
+    tmpMediaDir.subVectors(tmpMediaTarget, tmpMediaEye).normalize();
+    const prevFar = raycaster.far;
+    raycaster.set(tmpMediaEye, tmpMediaDir);
+    // 🌟 목표 미디어블록 자신의 메시는 히트 단위로 제외 (그룹째로 담겨 있어 targets 필터로는 걸러지지 않음)
+    //    공격 판정과 동일하게 far = dist - 0.3 (목표 몸체 제외)
+    raycaster.far = Math.max(0.1, dist - 0.3);
+    const blocked = raycaster.intersectObjects(targets, true).some(h => h.object !== hit.object);
+    raycaster.far = prevFar;
+    if (blocked) { showToast('벽에 가려져 있어 볼 수 없습니다'); return true; }
+    openMediaViewer(idx);
+    return true;
+}
+
+document.getElementById('media-apply').addEventListener('click', (e) => { e.stopPropagation(); applyMediaFromInput(); });
+document.getElementById('media-kind-video').addEventListener('click', (e) => { e.stopPropagation(); currentMediaKindPick = 'video'; refreshMediaKindPick(); });
+document.getElementById('media-kind-image').addEventListener('click', (e) => { e.stopPropagation(); currentMediaKindPick = 'image'; refreshMediaKindPick(); });
+document.getElementById('media-kind-web').addEventListener('click', (e) => { e.stopPropagation(); currentMediaKindPick = 'web'; refreshMediaKindPick(); });
+document.getElementById('media-unlink').addEventListener('click', (e) => { e.stopPropagation(); unlinkCurrentMedia(); });
+document.getElementById('media-modal').addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'media-modal') closeMediaModal();
+});
+let lastPinkCollided = false;
+
+const keys = { w: false, a: false, s: false, d: false, flyUp: false, flyDown: false };
+const charPhysics = {
+    position: new THREE.Vector3(0, 0, 0),
+    velocity: new THREE.Vector3(0, 0, 0),
+    speed: 0.1,
+    gravity: 0.007,
+    isGrounded: true,
+    isCrawling: false,
+    crawlProgress: 0,
+    height: 1.0
+};
+
+const prevCharPos = new THREE.Vector3();
+let lastEmitTime = 0;
+// 🌟 [P0-1] 틱 슬리밍용 송신 상태 (이동 10Hz·정지 500ms heartbeat 판정)
+const lastSentPos = new THREE.Vector3(Infinity, Infinity, Infinity);
+let lastSentRotY = Infinity, lastSentCrawl = null, teleportQuietUntil = 0;
+// 🌟 [C안 ②] 프레임 루프용 재사용 벡터 — 매 프레임 new Vector3() 할당으로 인한 GC 히칭(스터터링) 제거
+const tmpMove = new THREE.Vector3();
+const tmpCamDir = new THREE.Vector3(), tmpCamRight = new THREE.Vector3(), tmpFinalDir = new THREE.Vector3();
+const tmpCamTarget = new THREE.Vector3(), tmpCamOffset = new THREE.Vector3();
+// 🌟 [C안 ②] 캐릭터 부위 참조 캐싱 — 매 프레임 getObjectByName(씬 트리 순회) 8회 제거
+function collectParts(g) {
+    return {
+        head: g.getObjectByName("head"), torso: g.getObjectByName("torso"),
+        lL: g.getObjectByName("leftLeg"), rL: g.getObjectByName("rightLeg"),
+        lA: g.getObjectByName("leftArm"), rA: g.getObjectByName("rightArm"),
+        np: g.getObjectByName("nameplate"), lifeGauge: g.getObjectByName("lifeGauge")
+    };
+}
+let localParts = null;
+// 🌟 [C안 ⑤] 큐브블록 개수 캐시 — 0개면 매 프레임 트랩 스캔(240칸)을 통째로 생략
+let pinkBlockCount = 0;
+
+let touchActive = false;
+let joystickStart = { x: 0, y: 0 };
+let joystickDir = { x: 0, y: 0 };
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2(0, 0);
+
+const instancedMeshes = [];
+const MAX_INSTANCES_PER_COLOR = 100000;
+
+function getIndex(x, y, z) {
+    const xIdx = Math.floor(x + HALF_WIDTH);
+    const yIdx = Math.floor(y);
+    const zIdx = Math.floor(z + HALF_DEPTH);
+    if (xIdx < 0 || xIdx >= WIDTH || yIdx < 0 || yIdx >= HEIGHT || zIdx < 0 || zIdx >= DEPTH) return -1;
+    return xIdx + zIdx * WIDTH + yIdx * WIDTH * DEPTH;
+}
+
+function getPosFromIndex(idx) {
+    const yIdx = Math.floor(idx / (WIDTH * DEPTH));
+    const rem = idx % (WIDTH * DEPTH);
+    const zIdx = Math.floor(rem / WIDTH);
+    const xIdx = rem % WIDTH;
+    return {
+        x: xIdx - HALF_WIDTH + 0.5,
+        y: yIdx + 0.5,
+        z: zIdx - HALF_DEPTH + 0.5
+    };
+}
+
+// 🌟 [추가] 블록에 테두리(Border)를 주어 입체감을 살리는 텍스처 생성 함수
+function createBlockTexture(colorHex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; 
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    
+    // 1. 기본 바탕색 채우기
+    ctx.fillStyle = colorHex;
+    ctx.fillRect(0, 0, 64, 64);
+    
+    // 2. 상단, 좌측에 얇은 밝은 테두리 (빛을 받는 느낌)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(0, 0, 64, 2); // 위
+    ctx.fillRect(0, 0, 2, 64); // 왼쪽
+    
+    // 3. 하단, 우측에 얇은 어두운 테두리 (그림자 지는 느낌)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(0, 62, 64, 2); // 아래
+    ctx.fillRect(62, 0, 2, 64); // 오른쪽
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    // 선명한 픽셀 형태 유지를 위해 필터링 설정
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    return texture;
+}
+
+// 🌟 [추가] 큐브블록(11번) 전용 텍스처: 실제 루빅스큐브처럼 면마다 다른 색의 3×3 스티커 배열
+function createRubikFaceTexture(faceHex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; 
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    
+    // 1. 바탕(스티커 사이 이음새)은 실제 루빅스큐브처럼 검정 계열
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(0, 0, 64, 64);
+    
+    // 2. 3×3 스티커: 면의 고유 색을 균일하게 채우고 베벨 음영만으로 미니큐브 입체감을 줌
+    for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+            const x = 1 + i * 21, y = 1 + j * 21;
+            ctx.fillStyle = faceHex;
+            ctx.fillRect(x, y, 19, 19);
+            // 각 미니큐브에 베벨(상단·좌측 밝게, 하단·우측 어둡게)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+            ctx.fillRect(x, y, 19, 2);
+            ctx.fillRect(x, y, 2, 19);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+            ctx.fillRect(x, y + 17, 19, 2);
+            ctx.fillRect(x + 17, y, 2, 19);
+        }
+    }
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    return texture;
+}
+
+// 🌟 미디어블록(12번) 면 텍스처: 큐브블록과 같은 면색 배치의 2×2 스티커 (재생버튼 없음)
+function createMediaFaceTexture(faceHex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(0, 0, 64, 64);
+
+    const cells = [[1, 1], [33, 1], [1, 33], [33, 33]];
+    for (const cp of cells) {
+        const x = cp[0], y = cp[1];
+        ctx.fillStyle = faceHex;
+        ctx.fillRect(x, y, 30, 30);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+        ctx.fillRect(x, y, 30, 2);
+        ctx.fillRect(x, y, 2, 30);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+        ctx.fillRect(x, y + 28, 30, 2);
+        ctx.fillRect(x + 28, y, 2, 30);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    return texture;
+}
+
+// 🌟 [추가] 증분 갱신 시스템: 블록 1개 변경 시 86만 칸 재스캔 없이 해당 슬롯만 부분 GPU 업로드
+const blockSlot = new Int32Array(MAP_SIZE).fill(-1);      // 블록 인덱스 → 색상 메시 내 슬롯 (11번 큐브블록은 별도 Map)
+const colorSlotIndex = [];                                 // 색상별: 슬롯 → 블록 인덱스 (스왑 제거 시 매핑 유지)
+const colorCounts = new Array(12).fill(0);                 // 색상별 라이브 인스턴스 수
+const dirtyColorSlots = [];                                // 색상별 프레임 내 변경 슬롯 (렌더 직전 묶음 업로드)
+const cubeBlockMeshMap = new Map();                        // 큐브블록(11번): 블록 인덱스 → 개별 Mesh
+const mediaBlockMeshMap = new Map();                       // 미디어블록(12번): 블록 인덱스 → 개별 Mesh
+let incTempObject = null, incSwapMatrix = null;            // 증분 갱신용 임시 객체 (지연 생성)
+for (let c = 1; c <= 10; c++) {
+    colorSlotIndex[c] = new Int32Array(MAX_INSTANCES_PER_COLOR).fill(-1);
+    dirtyColorSlots[c] = [];
+}
+dirtyColorSlots[11] = [];
+
+function markDirtySlot(c, slot) { dirtyColorSlots[c].push(slot); }
+
+function addInstancedBlock(c, idx) {
+    const imesh = instancedMeshes[c];
+    if (!imesh) return;
+    const slot = colorCounts[c];
+    if (slot >= MAX_INSTANCES_PER_COLOR) return; // 색상별 용량 초과 — 대량 갱신 경로에서 처리
+    if (!incTempObject) incTempObject = new THREE.Object3D();
+    const pos = getPosFromIndex(idx);
+    incTempObject.position.set(pos.x, pos.y, pos.z);
+    incTempObject.updateMatrix();
+    imesh.setMatrixAt(slot, incTempObject.matrix);
+    colorSlotIndex[c][slot] = idx;
+    blockSlot[idx] = slot;
+    colorCounts[c] = slot + 1;
+    imesh.count = colorCounts[c];
+    markDirtySlot(c, slot);
+}
+
+function removeInstancedBlock(c, idx) {
+    const imesh = instancedMeshes[c];
+    if (!imesh) return;
+    const slot = blockSlot[idx];
+    if (slot < 0) return;
+    const last = colorCounts[c] - 1;
+    if (slot !== last) {
+        // 스왑 제거: 마지막 인스턴스를 빈 슬롯으로 이동 — count가 렌더 범위라 원래 마지막 칸은 업로드 불필요
+        const lastIdx = colorSlotIndex[c][last];
+        if (!incSwapMatrix) incSwapMatrix = new THREE.Matrix4();
+        imesh.getMatrixAt(last, incSwapMatrix);
+        imesh.setMatrixAt(slot, incSwapMatrix);
+        colorSlotIndex[c][slot] = lastIdx;
+        blockSlot[lastIdx] = slot;
+        colorSlotIndex[c][last] = -1;
+        markDirtySlot(c, slot);
+    }
+    colorCounts[c] = last;
+    imesh.count = last;
+    blockSlot[idx] = -1;
+}
+
+function flushDirtyBlocks() {
+    if (!isEngineInitialized) return;
+    for (let c = 1; c <= 10; c++) {
+        const list = dirtyColorSlots[c];
+        if (!list || !list.length) continue;
+        const n = list.length;
+        const first = list[0];
+        let minS = Infinity, maxS = -Infinity;
+        for (let i = 0; i < n; i++) { const s = list[i]; if (s < minS) minS = s; if (s > maxS) maxS = s; }
+        list.length = 0;
+        const imesh = instancedMeshes[c];
+        if (!imesh) continue;
+        if (n === 1) {
+            // 단일 변경: 슬롯 1칸(행렬 16 floats)만 업로드
+            imesh.instanceMatrix.updateRange.offset = first * 16;
+            imesh.instanceMatrix.updateRange.count = 16;
+        } else {
+            const span = maxS - minS + 1;
+            if (span <= 1024) {
+                imesh.instanceMatrix.updateRange.offset = minS * 16;
+                imesh.instanceMatrix.updateRange.count = span * 16;
+            } else {
+                imesh.instanceMatrix.updateRange.offset = 0;
+                imesh.instanceMatrix.updateRange.count = -1; // 광범위 변경 — 전체 업로드
+            }
+        }
+        imesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
+function updateInstancedMeshes() {
+    if (!isEngineInitialized) return;
+
+    const colorLists = Array.from({ length: 13 }, () => []); 
+    for (let i = 0; i < MAP_SIZE; i++) {
+        const val = worldData[i];
+        if (val > 0 && val <= 12) { 
+            colorLists[val].push(i);
+        }
+    }
+
+    const tempObject = new THREE.Object3D();
+    for (let c = 1; c <= 12; c++) { 
+        const imesh = instancedMeshes[c];
+        if (!imesh) continue;
+
+        const indices = colorLists[c];
+        const count = Math.min(indices.length, MAX_INSTANCES_PER_COLOR);
+        
+        imesh.count = count;
+        for (let i = 0; i < count; i++) {
+            const pos = getPosFromIndex(indices[i]);
+            tempObject.position.set(pos.x, pos.y, pos.z);
+            tempObject.updateMatrix();
+            imesh.setMatrixAt(i, tempObject.matrix);
+        }
+        imesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // 🌟 [추가] 큐브블록(11번): 면색 6종 개별 메시로 렌더링 (개수가 적어 재구성 비용 거의 없음)
+    if (cubeBlockGroup && cubeBlockGeo && rubikFaceMaterials) {
+        while (cubeBlockGroup.children.length > 0) cubeBlockGroup.remove(cubeBlockGroup.children[0]);
+        cubeBlockMeshMap.clear();
+        for (const i of colorLists[11]) {
+            const pos = getPosFromIndex(i);
+            const block = new THREE.Mesh(cubeBlockGeo, rubikFaceMaterials);
+            block.position.set(pos.x, pos.y, pos.z);
+            block.castShadow = true;
+            block.receiveShadow = true;
+            cubeBlockGroup.add(block);
+            cubeBlockMeshMap.set(i, block);
+        }
+    }
+
+    // 🌟 미디어블록(12번): 큐브와 같은 면색 배치의 2×2 개별 메시로 렌더링
+    if (mediaBlockGroup && cubeBlockGeo && mediaFaceMaterials) {
+        while (mediaBlockGroup.children.length > 0) mediaBlockGroup.remove(mediaBlockGroup.children[0]);
+        mediaBlockMeshMap.clear();
+        for (const i of colorLists[12]) {
+            const pos = getPosFromIndex(i);
+            const block = new THREE.Mesh(cubeBlockGeo, mediaFaceMaterials);
+            block.position.set(pos.x, pos.y, pos.z);
+            block.userData = { colorId: 12, worldIdx: i };
+            block.castShadow = true;
+            block.receiveShadow = true;
+            mediaBlockGroup.add(block);
+            mediaBlockMeshMap.set(i, block);
+        }
+    }
+
+    // 🌟 [추가] 증분 구조 전체 재동기화 (맵 로드/초기화 등 대량 변경 후 호출됨)
+    blockSlot.fill(-1);
+    for (let c = 1; c <= 10; c++) {
+        const live = colorLists[c];
+        const n = Math.min(live.length, MAX_INSTANCES_PER_COLOR);
+        colorCounts[c] = n;
+        colorSlotIndex[c].fill(-1);
+        for (let s = 0; s < n; s++) {
+            blockSlot[live[s]] = s;
+            colorSlotIndex[c][s] = live[s];
+        }
+        dirtyColorSlots[c].length = 0;
+        if (instancedMeshes[c]) instancedMeshes[c].instanceMatrix.updateRange.count = -1;
+    }
+    dirtyColorSlots[11].length = 0;
+    pinkBlockCount = colorLists[11].length; // 🌟 [C안 ⑤] 전체 갱신 시 큐브블록 개수 재계산
+}
+
+// 박스 모서리 둥글게 (UV·재질그룹 유지 — 얼굴 텍스처 안 깨짐, 기어가기 scale과 충돌 없게 지오메트리에 baked)
+function softenBox(geo, r) {
+    const p = geo.parameters;
+    const hx = p.width / 2 - r, hy = p.height / 2 - r, hz = p.depth / 2 - r;
+    const pos = geo.attributes.position;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        const qx = Math.max(-hx, Math.min(hx, v.x));
+        const qy = Math.max(-hy, Math.min(hy, v.y));
+        const qz = Math.max(-hz, Math.min(hz, v.z));
+        const dx = v.x - qx, dy = v.y - qy, dz = v.z - qz;
+        const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len > r && len > 1e-6) {
+            const s = r / len;
+            pos.setXYZ(i, qx + dx * s, qy + dy * s, qz + dz * s);
+        }
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+}
+
+function createSteveHeadTextures(isJjonji = false) {
+    const materials = [];
+    const faces = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+    // 얼굴 = 아이보리 고정, 고글 두눈 유지 / 머리카락 = 남녀 구분 없는 단발(밥) 스타일 (쫀지도 동일)
+    const base = '#E8C1A2';
+    const hair = '#4a2c11';
+    const strap = '#2b2b2b';
+    const rim = '#B0BEC5';
+    const rimDark = '#78909C';
+
+    faces.forEach(face => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(4, 4); // 64 좌표계 그대로 4배 해상도로 그리기 (확대해도 깨지지 않음)
+
+        if (face === 'top') {
+            ctx.fillStyle = hair; ctx.fillRect(0, 0, 64, 64);
+        } else if (face === 'bottom') {
+            ctx.fillStyle = base; ctx.fillRect(0, 0, 64, 64);
+        } else if (face === 'front') {
+            ctx.fillStyle = base; ctx.fillRect(0, 0, 64, 64);
+            // 앞머리 (일자 뱅 + 옆으로 대각선 연결 — 눈과 겹치지 않게 아치형)
+            ctx.fillStyle = hair;
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(64, 0); ctx.lineTo(64, 30);
+            ctx.lineTo(52, 12); ctx.lineTo(12, 12); ctx.lineTo(0, 30);
+            ctx.closePath(); ctx.fill();
+            // 맨눈 + 얇은 테두리 (고글만큼 크게)
+            const eyes = [[19, 30], [45, 30]];
+            eyes.forEach(([cx, cy]) => {
+                ctx.fillStyle = rimDark;
+                ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = rim;
+                ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#212121';
+                ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - 3, cy - 5, 4, 4);
+            });
+            // 코 (작은 타원)
+            ctx.fillStyle = '#D89A6B';
+            ctx.beginPath(); ctx.ellipse(32, 43, 3.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+            // 미소
+            ctx.strokeStyle = '#4e342e'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.arc(32, 47, 8, 0.4, Math.PI - 0.4); ctx.stroke();
+        } else if (face === 'back') {
+            ctx.fillStyle = hair; ctx.fillRect(0, 0, 64, 64);
+        } else if (face === 'right' || face === 'left') {
+            // 옆머리: 위·뒤는 덮고 앞-아래만 대각선으로 얼굴 노출 (right 캔버스 왼쪽=앞, left는 미러)
+            ctx.fillStyle = hair; ctx.fillRect(0, 0, 64, 64);
+            ctx.fillStyle = base;
+            ctx.beginPath();
+            if (face === 'right') {
+                ctx.moveTo(0, 30); ctx.lineTo(0, 64); ctx.lineTo(44, 64); ctx.closePath();
+            } else {
+                ctx.moveTo(64, 30); ctx.lineTo(64, 64); ctx.lineTo(20, 64); ctx.closePath();
+            }
+            ctx.fill();
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter;
+        materials.push(new THREE.MeshLambertMaterial({ map: texture }));
+    });
+    return materials;
+}
+
+function createSteveArmTextures(isJjonji = false, sleeveHex = null) {
+    const materials = [];
+    const faces = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+    // 최초 방식: 위 소매(티셔츠색, 쫀지는 진회색) + 아래 손(아이보리, 쫀지도 동일)
+    const sleeveColor = isJjonji ? '#404040' : (sleeveHex || '#00cbc9');
+    const skinColor = '#E8C1A2';
+    faces.forEach(face => {
+        const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+
+        if (face === 'top') {
+            ctx.fillStyle = sleeveColor; ctx.fillRect(0, 0, 16, 32);
+        } else if (face === 'bottom') {
+            ctx.fillStyle = skinColor; ctx.fillRect(0, 0, 16, 32);
+        } else {
+            ctx.fillStyle = sleeveColor; ctx.fillRect(0, 0, 16, 13);
+            ctx.fillStyle = skinColor; ctx.fillRect(0, 13, 16, 19);
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter;
+        materials.push(new THREE.MeshLambertMaterial({ map: texture }));
+    });
+    return materials;
+}
+
+function drawRoundRect(ctx, x, y, width, height, radius) {
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, width, height, radius);
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+    }
+}
+
+function createNameplate(name) {
+    const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+    ctx.font = `bold 33px "Noto Sans KR", "Noto Sans KR Latin", sans-serif`; const w = ctx.measureText(name).width + 32;
+    canvas.width = w + 8; canvas.height = 72;
+    ctx.font = `bold 33px "Noto Sans KR", "Noto Sans KR Latin", sans-serif`; ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.beginPath(); 
+    drawRoundRect(ctx, 4, 4, w, 56, 12); 
+    ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(name, canvas.width / 2, 32);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
+    sprite.scale.set(0.618 * (canvas.width / canvas.height), 0.618, 1); return sprite;
+}
+
+function createLifeGaugeGroup() {
+    const gaugeGroup = new THREE.Group();
+    gaugeGroup.name = "lifeGauge";
+    
+    for (let i = 0; i < 3; i++) {
+        const geometry = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+        const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set((i - 1) * 0.25, 0, 0);
+        gaugeGroup.add(mesh);
+    }
+    gaugeGroup.position.set(0, 2.2, 0); 
+    gaugeGroup.visible = (globalMode === 'ATTACK'); 
+    return gaugeGroup;
+}
+
+function updateLifeGaugeVisibility() {
+    const show = (globalMode === 'ATTACK');
+    if (characterGroup) {
+        const gauge = characterGroup.getObjectByName("lifeGauge");
+        if (gauge) gauge.visible = show && !myIsZombie; // 🌟 좀비는 생명표시 없음
+    }
+    remotePlayers.forEach(p => {
+        if (p.group) {
+            const gauge = p.group.getObjectByName("lifeGauge");
+            if (gauge) gauge.visible = show && !p.isZombie; // 🌟 좀비는 생명표시 없음
+        }
+    });
+}
+
+function updateNormalUserUI() {
+    const hotbarWrapper = document.getElementById('hotbar-wrapper');
+    if (!hotbarWrapper) return;
+    
+    if (isEasterEgg) {
+        hotbarWrapper.classList.remove('hidden');
+        document.querySelector('.hotbar-slot[data-index="10"]').style.display = 'flex'; 
+        document.querySelector('.hotbar-slot[data-index="11"]').style.display = 'flex'; 
+    } else {
+        document.querySelector('.hotbar-slot[data-index="10"]').style.display = 'none'; 
+        document.querySelector('.hotbar-slot[data-index="11"]').style.display = 'none'; 
+        if (activeHotbarIndex === 10 || activeHotbarIndex === 11) selectHotbar(0);
+        if (globalMode === 'ATTACK' || globalMode === 'SAFE') {
+            hotbarWrapper.classList.add('hidden'); 
+        } else {
+            hotbarWrapper.classList.remove('hidden'); 
+        }
+    }
+}
+
+function updateAdminUI() {
+    if (!isEasterEgg) return;
+    document.getElementById('admin-mode-controls').classList.remove('hidden');
+    document.getElementById('admin-mode-controls').classList.add('flex');
+    
+    document.querySelectorAll('.admin-mode-btn').forEach(btn => {
+        const mode = btn.getAttribute('data-mode');
+        if (mode === globalMode) {
+            if(mode === 'ATTACK') btn.className = "admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all bg-red-600 text-white shadow-md scale-110";
+            if(mode === 'SAFE') btn.className = "admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all bg-green-600 text-white shadow-md scale-110";
+            if(mode === 'GRAVITY') btn.className = "admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all bg-blue-600 text-white shadow-md scale-110";
+            if(mode === 'FLIGHT') btn.className = "admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all bg-purple-600 text-white shadow-md scale-110";
+        } else {
+            btn.className = "admin-mode-btn w-7 h-7 rounded flex items-center justify-center pointer-events-auto transition-all bg-rose-950/40 hover:bg-rose-900/60 border border-rose-900/30 text-rose-200 shadow-sm";
+        }
+    });
+}
+
+function buildSteveCharacter(name = steveName, isJjonji = false, outfitId = null) {
+    const group = new THREE.Group();
+    // 얼굴·머리 = 일반 접속자와 동일 / 옷만 최초 쫀지색(진회색+검정)
+    // 🌟 일반 의상: 입장 화면에서 고른 6종 중 1종 (쫀지는 항상 진회색+검정 고정)
+    const outfit = outfitById(outfitId || selectedOutfitId);
+    const torsoHex = isJjonji ? '#404040' : outfit.shirt;
+    const pantsHex = isJjonji ? '#222222' : outfit.pants;
+    const headGeo = new THREE.BoxGeometry(1, 1, 1, 3, 3, 3); softenBox(headGeo, 0.12);
+    const head = new THREE.Mesh(headGeo, createSteveHeadTextures(isJjonji));
+    head.position.y = 1.5; head.name = "head"; head.castShadow = true; group.add(head);
+
+    const torsoGeo = new THREE.BoxGeometry(0.8, 0.6, 0.4, 2, 2, 2); softenBox(torsoGeo, 0.08);
+    const torso = new THREE.Mesh(torsoGeo, new THREE.MeshLambertMaterial({ color: parseInt(torsoHex.slice(1), 16) })); // 몸통 = 바지색
+    torso.position.y = 0.7; torso.name = "torso"; torso.castShadow = true; group.add(torso);
+
+    const legGeo = new THREE.BoxGeometry(0.38, 0.4, 0.4, 2, 2, 2); softenBox(legGeo, 0.06); legGeo.translate(0, -0.2, 0);
+    const legMat = new THREE.MeshLambertMaterial({ color: parseInt(pantsHex.slice(1), 16) }); // 쫀지: 검정(팔레트 10번)
+    const lL = new THREE.Mesh(legGeo, legMat); lL.position.set(-0.2, 0.4, 0); lL.name = "leftLeg"; lL.castShadow = true; group.add(lL);
+    const rL = new THREE.Mesh(legGeo, legMat); rL.position.set(0.2, 0.4, 0); rL.name = "rightLeg"; rL.castShadow = true; group.add(rL);
+
+    const armGeo = new THREE.BoxGeometry(0.24, 0.6, 0.35, 2, 2, 2); softenBox(armGeo, 0.05); armGeo.translate(0, -0.3, 0);
+    const lA = new THREE.Mesh(armGeo, createSteveArmTextures(isJjonji, outfit.shirt)); lA.position.set(-0.5, 1.0, 0); lA.name = "leftArm"; lA.castShadow = true; group.add(lA);
+    const rA = new THREE.Mesh(armGeo, createSteveArmTextures(isJjonji, outfit.shirt)); rA.position.set(0.5, 1.0, 0); rA.name = "rightArm"; rA.castShadow = true; group.add(rA);
+    
+    const np = createNameplate(name); np.position.y = 2.6; np.name = "nameplate"; group.add(np);
+    
+    if (!isJjonji) {
+        const lifeGauge = createLifeGaugeGroup();
+        group.add(lifeGauge);
+    }
+    
+    if (scene) scene.add(group);
+    return group;
+}
+
+// 🌟 좀비화: 캐릭터의 모든 색(텍스처 포함)을 회색음영으로 변환. 이름표는 유지, 한 번만 적용됨
+function zombifyCharacter(group) {
+    if (!group || group.userData.zombified) return;
+    group.userData.zombified = true;
+    group.traverse((obj) => {
+        if (obj.isSprite) return; // 이름표는 그대로 유지
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach((mat) => {
+            if (mat.color) {
+                const c = mat.color;
+                const l = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b; // 현재 색의 밝기를 유지한 채 무채색으로
+                mat.color.setRGB(l, l, l);
+            }
+            if (mat.map && mat.map.image && mat.map.image.width) {
+                const src = mat.map.image;
+                const grayCanvas = document.createElement('canvas');
+                grayCanvas.width = src.width; grayCanvas.height = src.height;
+                const gctx = grayCanvas.getContext('2d');
+                gctx.drawImage(src, 0, 0);
+                const img = gctx.getImageData(0, 0, grayCanvas.width, grayCanvas.height);
+                const d = img.data;
+                for (let i = 0; i < d.length; i += 4) {
+                    const g = Math.round(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]);
+                    d[i] = g; d[i+1] = g; d[i+2] = g;
+                }
+                gctx.putImageData(img, 0, 0);
+                const grayTex = new THREE.CanvasTexture(grayCanvas);
+                grayTex.magFilter = mat.map.magFilter;
+                grayTex.minFilter = mat.map.minFilter;
+                mat.map = grayTex;
+                mat.needsUpdate = true;
+            }
+        });
+    });
+}
+
+function checkCollision(px, py, pz, forceCrawlCheck = null, horizontalMargin = 0) {
+    // 🌟 [쫀지] 투명인간 모드가 켜져 있을 때만 블록 통과
+    if (isEasterEgg && ghostMode) return false; 
+    
+    const r = 0.35 - horizontalMargin;
+    const activeCrawling = (forceCrawlCheck !== null) ? forceCrawlCheck : charPhysics.isCrawling;
+    const h = activeCrawling ? 0.85 : 1.95;
+    
+    const minX = Math.floor(px - r + HALF_WIDTH);
+    const maxX = Math.floor(px + r + HALF_WIDTH);
+    const minY = Math.floor(py);
+    const maxY = Math.floor(py + h);
+    const minZ = Math.floor(pz - r + HALF_DEPTH);
+    const maxZ = Math.floor(pz + r + HALF_DEPTH);
+    
+    for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+            for (let z = minZ; z <= maxZ; z++) {
+                if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT && z >= 0 && z < DEPTH) {
+                    const idx = x + z * WIDTH + y * WIDTH * DEPTH;
+                    if (worldData[idx] > 0) return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// 🌟 공격 시선 차단: 공격자 눈↔대상 눈 사이 블록 관통 검사
+//    서 있으면 눈 +1.5 (1칸 벽 너머 가능, 2칸 이상 차단), 기어다니면 눈 +0.5 (1칸 벽에 완전 은폐)
+const tmpEyeA = new THREE.Vector3(), tmpEyeB = new THREE.Vector3(), tmpEyeDir = new THREE.Vector3();
+function isWallBetweenEyes(targetPlayer) {
+    tmpEyeA.copy(characterGroup.position);
+    tmpEyeA.y += charPhysics.isCrawling ? 0.5 : 1.5;
+    tmpEyeB.copy(targetPlayer.group.position);
+    tmpEyeB.y += targetPlayer.isCrawling ? 0.5 : 1.5;
+    tmpEyeDir.subVectors(tmpEyeB, tmpEyeA);
+    const dist = tmpEyeDir.length();
+    if (dist < 0.001) return false;
+    tmpEyeDir.normalize();
+    raycaster.set(tmpEyeA, tmpEyeDir);
+    const prevFar = raycaster.far;
+    raycaster.far = dist - 0.3; // 대상 몸체 히트는 제외
+    const intersectables = [floorMesh];
+    for (let c = 1; c <= 11; c++) {
+        if (instancedMeshes[c]) intersectables.push(instancedMeshes[c]);
+    }
+    if (cubeBlockGroup) intersectables.push(cubeBlockGroup);
+    if (mediaBlockGroup) intersectables.push(mediaBlockGroup);
+    const hits = raycaster.intersectObjects(intersectables, true);
+    raycaster.far = prevFar;
+    return hits.length > 0;
+}
+
+function checkPinkBlockCollision(px, py, pz) {
+    const r = 0.35;
+    const minX = Math.floor(px - r + HALF_WIDTH);
+    const maxX = Math.floor(px + r + HALF_WIDTH);
+    const minZ = Math.floor(pz - r + HALF_DEPTH);
+    const maxZ = Math.floor(pz + r + HALF_DEPTH);
+    // 🌟 발 높이 ±1층의 큐브에만 반응 (머리 위·발 밑 큐브를 스쳐도 발동하지 않음)
+    const minY = Math.max(0, Math.floor(py) - 1);
+    const maxY = Math.min(HEIGHT - 1, Math.floor(py) + 1);
+    
+    for (let x = minX; x <= maxX; x++) {
+        for (let z = minZ; z <= maxZ; z++) {
+            for (let y = minY; y <= maxY; y++) {
+                if (x >= 0 && x < WIDTH && z >= 0 && z < DEPTH) {
+                    const idx = x + z * WIDTH + y * WIDTH * DEPTH;
+                    if (worldData[idx] === 11) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// 🌟 접속 시 또는 맵 로드 시 스폰/현재 위치에 블록이 있으면, 해당 위치의 가장 높은 블록 꼭대기 위로 캐릭터를 단번에 들어올림
+//    (블록에 끼이거나 갇히는 현상을 100% 원천 방지하며, 즉시 서버로 위치를 동기화하여 타인/관제에도 반영)
+function liftCharacterOutOfBlocks() {
+    if (!charPhysics || !isEngineInitialized) return;
+    if (isEasterEgg && ghostMode) return; // 쫀지가 투명인간(유령) 모드일 때만 통과 허용
+
+    const p = charPhysics.position;
+    // 🌟 캐릭터가 스폰 지점(중앙 x=0, z=0 부근)일 때는 스폰 4칸 구역(x: 59~60, z: 59~60) 전체를 아울러 검사
+    const isAtSpawn = (Math.abs(p.x) < 2 && Math.abs(p.z) < 2);
+    const minX = isAtSpawn ? 59 : Math.max(0, Math.floor(p.x - 0.38 + HALF_WIDTH));
+    const maxX = isAtSpawn ? 60 : Math.min(WIDTH - 1, Math.floor(p.x + 0.38 + HALF_WIDTH));
+    const minZ = isAtSpawn ? 59 : Math.max(0, Math.floor(p.z - 0.38 + HALF_DEPTH));
+    const maxZ = isAtSpawn ? 60 : Math.min(DEPTH - 1, Math.floor(p.z + 0.38 + HALF_DEPTH));
+
+    // 🌟 몸통과 실제로 겹치는 블록만 수집 (다리·천장 밑 통과는 겹침 없음 → 올리지 않음)
+    //    몸통 범위: 발 y-1.0 ~ 머리 y+1.95 (기어가기 y+0.85) — 건축 겹침 판정과 동일 기준
+    //    겹침이 없을 때까지 반복 상승하므로 깊은 매몰도 완전히 탈출함 (이벤트 시점에만 동작)
+    const yStart = p.y;
+    for (let guard = 0; guard < HEIGHT; guard++) {
+        const bodyTop = p.y + (charPhysics.isCrawling ? 0.85 : 1.95);
+        let maxOverlapY = -1;
+        for (let y = 0; y < HEIGHT; y++) {
+            if (y + 0.5 <= p.y - 1.0 || y - 0.5 >= bodyTop) continue; // 몸통과 수직으로 안 겹치면 스킵
+            for (let x = minX; x <= maxX; x++) {
+                for (let z = minZ; z <= maxZ; z++) {
+                    const idx = y * (WIDTH * DEPTH) + z * WIDTH + x;
+                    if (worldData[idx] > 0) {
+                        if (y > maxOverlapY) maxOverlapY = y;
+                    }
+                }
+            }
+        }
+        // 겹친 블록이 없거나, 발이 블록 상단과 거의 맞닿았으면(정상 착지) 종료
+        if (maxOverlapY < 0 || p.y >= maxOverlapY + 1 - 0.03) break;
+        p.y = maxOverlapY + 1.02;
+    }
+
+    // 실제로 움직였을 때만 착지 처리 + 위치 동기화
+    if (p.y !== yStart) {
+        charPhysics.velocity.set(0, 0, 0);
+        charPhysics.isGrounded = true; // 블록 상단에 즉시 안전 착지
+        
+        // 위치 변경을 서버와 다른 모든 접속자/관제에 즉시 전송 (끼임 해소 큰 이동임을 표시)
+        // 🌟 단, 소환 직후 300ms는 서버 배치가 이미 전파했으므로 생략. 월드 준비+입장 확정 전도 생략 (기본값 방송 차단)
+        if (worldReady && joinPositioned && socket && socket.connected && Date.now() >= teleportQuietUntil) {
+            socket.emit('player-move', {
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                rotY: characterGroup ? characterGroup.rotation.y : 0,
+                isCrawling: charPhysics.isCrawling,
+                lift: true
+            });
+        }
+    }
+}
+
+function handleInteract() {
+    if (!isEngineInitialized) return;
+    // 🌟 미디어블록 터치 우선 처리: 쫀지는 설정 팝업, 일반은 안전모드에서 열람 (5칸·시야 적용)
+    if (tryMediaTouch()) return;
+    if (freezeAll && !isEasterEgg) return; // 🌟 전체 동결 중 일반 접속자 블록 설치/삭제 불가 (쫀지는 항상 가능)
+
+    if (!isEasterEgg && (globalMode === 'ATTACK' || globalMode === 'SAFE')) return; 
+    
+    if (!isEasterEgg && selectedToolType !== 'eraser') {
+        const colorId = activeHotbarIndex + 1;
+        if (colorId === 11) return; 
+    }
+
+    raycaster.setFromCamera(mouse, camera);
+    
+    const intersectables = [floorMesh];
+    for (let c = 1; c <= 11; c++) {
+        if (instancedMeshes[c]) intersectables.push(instancedMeshes[c]);
+    }
+    if (cubeBlockGroup) intersectables.push(cubeBlockGroup); // 큐브블록도 광선에 응답 (광선이 통과하지 않도록)
+    if (mediaBlockGroup) intersectables.push(mediaBlockGroup); // 미디어블록도 광선에 응답
+    
+    const intersects = raycaster.intersectObjects(intersectables, true); // true: 그룹(cubeBlockGroup) 안의 개별 메시까지 탐색
+    if (intersects.length > 0) {
+        const hit = intersects[0];
+        let targetPos = new THREE.Vector3();
+        
+        if (selectedToolType === "eraser") {
+            if (hit.object === floorMesh) return;
+            if (hit.instanceId !== undefined && hit.object instanceof THREE.InstancedMesh) {
+                const tempMatrix = new THREE.Matrix4();
+                hit.object.getMatrixAt(hit.instanceId, tempMatrix);
+                targetPos.setFromMatrixPosition(tempMatrix);
+                
+                targetPos.x = Math.floor(targetPos.x) + 0.5;
+                targetPos.y = Math.floor(targetPos.y) + 0.5;
+                targetPos.z = Math.floor(targetPos.z) + 0.5;
+            } else if (cubeBlockGroup && hit.object.parent === cubeBlockGroup) {
+                targetPos.copy(hit.object.position); // 큐브블록 메시 위치 = 칸 중심(.5 좌표)
+            } else if (mediaBlockGroup && hit.object.parent === mediaBlockGroup) {
+                targetPos.copy(hit.object.position); // 미디어블록 메시 위치 = 칸 중심(.5 좌표)
+            } else {
+                return;
+            }
+        } 
+        else {
+            if (hit.object instanceof THREE.InstancedMesh && hit.instanceId !== undefined) {
+                const tempMatrix = new THREE.Matrix4();
+                hit.object.getMatrixAt(hit.instanceId, tempMatrix);
+                const blockCenter = new THREE.Vector3();
+                blockCenter.setFromMatrixPosition(tempMatrix);
+                targetPos.copy(blockCenter).add(hit.face.normal);
+            } else if (cubeBlockGroup && hit.object.parent === cubeBlockGroup) {
+                targetPos.copy(hit.object.position).add(hit.face.normal); // 큐브블록 면 기준 인접 칸
+            } else if (mediaBlockGroup && hit.object.parent === mediaBlockGroup) {
+                targetPos.copy(hit.object.position).add(hit.face.normal); // 미디어블록 면 기준 인접 칸
+            } else if (hit.object === floorMesh) {
+                targetPos.copy(hit.point).add(hit.face.normal.clone().multiplyScalar(0.5));
+            } else {
+                return;
+            }
+            
+            targetPos.x = Math.floor(targetPos.x) + 0.5;
+            targetPos.y = Math.floor(targetPos.y) + 0.5;
+            targetPos.z = Math.floor(targetPos.z) + 0.5;
+            
+            if (targetPos.y < 0.5) targetPos.y = 0.5;
+        }
+        
+        if (targetPos.y >= 60.0) return;
+        
+        const idx = getIndex(targetPos.x, targetPos.y, targetPos.z);
+        if (idx === -1) return;
+        
+        // 🌟 큐브블록(11번)·미디어블록(12번)은 일반 접속자가 삭제할 수 없음 (운영자만 가능)
+        if (!isEasterEgg && selectedToolType === 'eraser' && (worldData[idx] === 11 || worldData[idx] === 12)) {
+            const toast = document.getElementById('toast');
+            if (toast) { toast.textContent = worldData[idx] === 12 ? '미디어블록은 삭제할 수 없습니다!' : '큐브블록은 삭제할 수 없습니다!'; toast.classList.remove('opacity-0'); setTimeout(() => toast.classList.add('opacity-0'), 1200); }
+            return;
+        }
+        
+        const xIdx = Math.floor(targetPos.x + HALF_WIDTH);
+        const zIdx = Math.floor(targetPos.z + HALF_DEPTH);
+        const isCenterSpawnArea = (xIdx === 59 || xIdx === 60) && (zIdx === 59 || zIdx === 60);
+        
+        if (!isEasterEgg && isCenterSpawnArea) return; 
+        
+        const distToChar = charPhysics.position.distanceTo(targetPos);
+        if (isEasterEgg || distToChar <= 5.0) {
+            if (selectedToolType !== 'eraser') {
+                if (!isEasterEgg) {
+                    let isOccupied = false;
+                    const checkOverlap = (px, py, pz, blockPos) => {
+                        const dx = Math.abs(px - blockPos.x);
+                        const dz = Math.abs(pz - blockPos.z);
+                        const inX = dx < 0.85; 
+                        const inZ = dz < 0.85;
+                        const inY = (blockPos.y - 0.5 < py + 1.95) && (blockPos.y + 0.5 > py - 1.0);
+                        return inX && inZ && inY;
+                    };
+
+                    if (checkOverlap(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z, targetPos)) {
+                        isOccupied = true;
+                    }
+                    remotePlayers.forEach(p => {
+                        if (checkOverlap(p.target.x, p.target.y, p.target.z, targetPos)) {
+                            isOccupied = true;
+                        }
+                    });
+
+                    if (isOccupied) return; 
+
+                    if (checkCollision(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z)) return;
+                }
+            }
+            
+            const colorId = activeHotbarIndex + 1;
+            socket.emit('block-change', { type: selectedToolType, index: idx, colorId: colorId });
+            // 🌟 쫀지가 미디어블록을 지우면 연결된 링크도 함께 제거 요청
+            if (isEasterEgg && selectedToolType === 'eraser' && worldData[idx] === 12) socket.emit('media-remove', { index: idx });
+            // 🌟 설치/삭제 효과음은 실행한 본인 화면에서만 재생
+            if (selectedToolType === 'eraser') sfx.playBreak(); else sfx.playPlace();
+            // 🌟 쫀지가 미디어블록을 새로 설치하면 링크 설정 팝업 (기존 미디어 터치는 tryMediaTouch에서 설정 팝업)
+            if (isEasterEgg && selectedToolType !== 'eraser' && colorId === 12) openMediaEditor(idx);
+        }
+    }
+}
+
+function applyBlockChange(data) {
+    const idx = data.index;
+    if (idx < 0 || idx >= MAP_SIZE) return;
+    const isErase = data.type === 'eraser';
+    const oldVal = worldData[idx];
+    const newVal = isErase ? 0 : data.colorId;
+    if (oldVal === newVal) return;
+
+    // 🌟 증분 갱신: 변경된 블록만 슬롯 조작 (전체 재스캔·전체 업로드 없음, 효과음은 본인 화면에서만)
+    if (oldVal === 11 && cubeBlockGroup) {
+        const mesh = cubeBlockMeshMap.get(idx);
+        if (mesh) { cubeBlockGroup.remove(mesh); cubeBlockMeshMap.delete(idx); }
+    } else if (oldVal === 12 && mediaBlockGroup) {
+        const mesh = mediaBlockMeshMap.get(idx);
+        if (mesh) { mediaBlockGroup.remove(mesh); mediaBlockMeshMap.delete(idx); }
+    } else if (oldVal >= 1 && oldVal <= 10) {
+        removeInstancedBlock(oldVal, idx);
+    }
+    if (newVal === 11 && cubeBlockGroup && cubeBlockGeo && rubikFaceMaterials) {
+        const pos = getPosFromIndex(idx);
+        const block = new THREE.Mesh(cubeBlockGeo, rubikFaceMaterials);
+        block.position.set(pos.x, pos.y, pos.z);
+        block.castShadow = true;
+        block.receiveShadow = true;
+        cubeBlockGroup.add(block);
+        cubeBlockMeshMap.set(idx, block);
+    } else if (newVal === 12 && mediaBlockGroup && cubeBlockGeo && mediaFaceMaterials) {
+        const pos = getPosFromIndex(idx);
+        const block = new THREE.Mesh(cubeBlockGeo, mediaFaceMaterials);
+        block.position.set(pos.x, pos.y, pos.z);
+        block.userData = { colorId: 12, worldIdx: idx };
+        block.castShadow = true;
+        block.receiveShadow = true;
+        mediaBlockGroup.add(block);
+        mediaBlockMeshMap.set(idx, block);
+    } else if (newVal >= 1 && newVal <= 10) {
+        addInstancedBlock(newVal, idx);
+    }
+    worldData[idx] = newVal;
+    // 🌟 미디어블록이 지워지면 링크 정보도 로컬에서 정리 (서버 media-removed와 멱등)
+    if (isErase && oldVal === 12 && typeof mediaInfo === 'object' && mediaInfo !== null) delete mediaInfo[idx];
+    // 🌟 [C안 ⑤] 큐브블록 개수 캐시 갱신 (0개면 트랩 스캔 생략)
+    if (oldVal === 11) pinkBlockCount--;
+    if (newVal === 11) pinkBlockCount++;
+}
+
+function initEngine() {
+    const canvas = document.getElementById('game-canvas');
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x8bcbf9);
+    scene.fog = new THREE.FogExp2(0x8bcbf9, 0.012);
+    
+    camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, qualityViewDistance(currentQuality));
+    // v4 성능 실험: preserveDrawingBuffer 제거(캡처 핸들러가 toDataURL 직전 renderer.render()를 다시 호출하므로 불필요)
+    // 안드로이드는 MSAA 비용이 커서 기본 OFF, iPad/PC는 기존처럼 ON
+    // 🌟 [C안 ①] powerPreference: 복합 GPU 기기에서 고성능 GPU 우선 사용 유도
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: !isAndroidDevice, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.05;
+    controls.maxDistance = 15; controls.minDistance = 4;
+    controls.maxPolarAngle = Math.PI * (75 / 180); controls.minPolarAngle = Math.PI * (1 / 180);
+    
+    controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: null };
+    
+    const startDist = 9.5, rad30 = Math.PI / 6;
+    camera.position.set(0, startDist * Math.sin(rad30) + 1.5, startDist * Math.cos(rad30));
+    controls.target.set(0, 0, 0); controls.update();
+    
+    // AmbientLight (환경광)
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    
+    // 방향성 조명 (그림자)
+    sunLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    sunLight.position.set(20, 60, 10); 
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;  
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 0.5;
+    sunLight.shadow.camera.far = 150;
+    
+    const d = 40;
+    sunLight.shadow.camera.left = -d;
+    sunLight.shadow.camera.right = d;
+    sunLight.shadow.camera.top = d;
+    sunLight.shadow.camera.bottom = -d;
+    sunLight.shadow.bias = -0.0005; 
+    scene.add(sunLight);
+    
+    floorMesh = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_SIZE, 1, FLOOR_SIZE), new THREE.MeshLambertMaterial({ color: 0x59893d }));
+    floorMesh.position.y = -0.5; floorMesh.receiveShadow = true; scene.add(floorMesh);
+    
+    const gridHelper = new THREE.GridHelper(FLOOR_SIZE, FLOOR_SIZE, 0x466d2e, 0x4d7535);
+    gridHelper.position.y = 0.01; scene.add(gridHelper);
+    
+    // 🌟 [수정] 텍스처(테두리)가 들어갔으므로 블록 크기를 1x1x1 꽉 차게 변경
+    const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+    // 🌟 [추가] 큐브블록(11번): 실제 루빅스큐브처럼 면마다 다른 색 재질 6종
+    // (박스 면 그룹 순서: 동(+x)=파랑, 서(-x)=초록, 위(+y)=흰색, 아래(-y)=노랑, 남(+z)=빨강, 북(-z)=주황)
+    const rubikFaceColors = [colorPalette[1], colorPalette[3], colorPalette[8], colorPalette[2], colorPalette[4], colorPalette[5]];
+    // 동=빨강, 서=노랑, 위=흰색, 아래=주황, 남=초록, 북=파랑 — 모두 기본 블록 팔레트 색상 그대로
+    rubikFaceMaterials = rubikFaceColors.map(hex => new THREE.MeshLambertMaterial({ map: createRubikFaceTexture(hex) }));
+    cubeBlockGeo = cubeGeo;
+    cubeBlockGroup = new THREE.Group();
+    scene.add(cubeBlockGroup);
+    // 🌟 미디어블록(12번): 큐브와 같은 면색 배치 + 면당 2×2 스티커
+    mediaFaceMaterials = rubikFaceColors.map(hex => new THREE.MeshLambertMaterial({ map: createMediaFaceTexture(hex) }));
+    mediaBlockGroup = new THREE.Group();
+    scene.add(mediaBlockGroup);
+    for (let c = 1; c <= 11; c++) {
+        // 큐브블록(11번)은 InstancedMesh 대신 cubeBlockGroup에서 면색 6종 메시로 렌더링
+        // 미디어블록(12번)은 mediaBlockGroup에서 2×2 면색 메시로 렌더링
+        if (c === 11) continue;
+        // 🌟 [추가] 색상별로 테두리(Bevel)가 입혀진 특수 텍스처 적용
+        const texture = createBlockTexture(colorPalette[c]);
+        const mat = new THREE.MeshLambertMaterial({ map: texture });
+        
+        const imesh = new THREE.InstancedMesh(cubeGeo, mat, MAX_INSTANCES_PER_COLOR);
+        imesh.count = 0;
+        imesh.castShadow = true;
+        imesh.receiveShadow = true;
+        scene.add(imesh);
+        instancedMeshes[c] = imesh;
+    }
+    
+    characterGroup = buildSteveCharacter(steveName, isEasterEgg);
+    localParts = collectParts(characterGroup); // 🌟 [C안 ②] 부위 참조 캐싱 (매 프레임 씬 순회 제거)
+    prevCharPos.copy(characterGroup.position);
+    
+    isEngineInitialized = true;
+    updateInstancedMeshes();
+    markWorldReady(); // init-state가 먼저 와 있었으면 확정 좌표로 탈출+방송
+    syncInitialPlayers();
+    
+    updateAdminUI();
+    updateNormalUserUI();
+    updateLifeGaugeVisibility();
+    applyQuality(currentQuality);
+}
+
+function syncInitialPlayers() {
+    if (!initialPlayerData || !scene) return;
+    
+    remotePlayers.forEach((p) => { if (p.group && p.group.parent) scene.remove(p.group); });
+    remotePlayers.clear();
+
+    for (const id in initialPlayerData) {
+        if (id !== socket.id) {
+            const isJjonji = initialPlayerData[id].isJjonji || false;
+            const remoteGroup = buildSteveCharacter(initialPlayerData[id].name, isJjonji, initialPlayerData[id].outfit);
+            const isZombie = initialPlayerData[id].isZombie || false;
+            if (isZombie) {
+                const g = remoteGroup.getObjectByName("lifeGauge");
+                if (g) g.visible = false;
+                zombifyCharacter(remoteGroup);
+            } else {
+                // 🌟 스냅샷의 남은 생명 수를 게이지에 반영 (새로고침한 관전 화면에서도 정확히 표시)
+                const g = remoteGroup.getObjectByName("lifeGauge");
+                if (g) for (let i = 0; i < 3; i++) g.children[i].visible = (i < (initialPlayerData[id].lives || 0));
+            }
+            scene.add(remoteGroup);
+            remotePlayers.set(id, {
+                group: remoteGroup,
+                target: new THREE.Vector3(initialPlayerData[id].x, initialPlayerData[id].y, initialPlayerData[id].z),
+                crawlProgress: 0,
+                isCrawling: initialPlayerData[id].isCrawling,
+                isZombie: isZombie,
+                isJjonji: isJjonji,
+                name: initialPlayerData[id].name || 'Steve',
+                outfit: initialPlayerData[id].outfit || null,
+                parts: collectParts(remoteGroup) // 🌟 [C안 ②] 부위 캐싱
+            });
+            // 🌟 스냅샷 위치를 초기 위치로 즉시 반영 (스폰에서 순간이동하는 것처럼 보이지 않게)
+            remoteGroup.position.copy(remotePlayers.get(id).target);
+        }
+    }
+}
+
+function saveWorldToFile() {
+    const blockData = {};
+    for (let i = 0; i < MAP_SIZE; i++) {
+        if (worldData[i] <= 0) continue;
+        // 🌟 미디어블록은 색상+링크를 함께 저장 (관제 저장과 동일 형식)
+        const m = (worldData[i] === 12) ? mediaInfo[i] : null;
+        blockData[i] = (m && m.url && m.kind) ? { c: 12, url: m.url, kind: m.kind } : worldData[i];
+    }
+    const blob = new Blob([JSON.stringify(blockData)], { type: "application/json" });
+    const now = new Date(), yy = String(now.getFullYear()).slice(-2), mm = String(now.getMonth() + 1).padStart(2, '0'), dd = String(now.getDate()).padStart(2, '0'), hh = String(now.getHours()).padStart(2, '0'), min = String(now.getMinutes()).padStart(2, '0'), ss = String(now.getSeconds()).padStart(2, '0');
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `KSMS-${yy}${mm}${dd}-${hh}${min}${ss}.블록세상`;
+    link.click();
+}
+
+// 🌟 원시 맵 객체를 월드에 적용 (파일 불러오기·번들 맵 자동 로드 공용, 텍스트 미디어 포함)
+function applyRawMap(raw) {
+    if (!raw || typeof raw !== 'object') return false;
+    worldData.fill(0);
+    mediaInfo = {};
+    for (const idx in raw) {
+        const n = Number(idx);
+        if (!Number.isInteger(n) || n < 0 || n >= MAP_SIZE) continue;
+        const v = raw[idx];
+        if (v && typeof v === 'object') {
+            const cid = Number(v.c);
+            if (!Number.isInteger(cid) || cid < 1 || cid > 12) continue;
+            worldData[n] = cid;
+            if (cid === 12) {
+                const cm = cleanMediaInfo({ url: v.url, kind: v.kind, text: v.text });
+                if (cm) mediaInfo[n] = cm;
+            }
+        } else {
+            const cid = Number(v);
+            if (!Number.isInteger(cid) || cid < 1 || cid > 12) continue;
+            worldData[n] = cid;
+        }
+    }
+    if (isEngineInitialized) updateInstancedMeshes();
+    return true;
+}
+
+// 🌟 번들 맵 자동 로드 (index.html과 같은 폴더의 map.블록세상 — 없으면 빈 월드)
+function loadBundledMap() {
+    return fetch('map.블록세상').then((r) => {
+        if (!r.ok) throw new Error('no map');
+        return r.json();
+    }).then((raw) => {
+        applyRawMap(raw);
+    }).catch(() => {});
+}
+
+function loadWorldFromFile(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        try {
+            const raw = JSON.parse(evt.target.result);
+            if (isVirtualMode) {
+                // 🌟 가상 모드도 검증 후 복원 (미디어 링크·텍스트 포함)
+                if (!applyRawMap(raw)) throw new Error('bad map');
+                liftCharacterOutOfBlocks(); // 불러온 맵에 파묻히면 블록 위로 (멀티와 동일)
+            } else {
+                socket.emit('admin-load-map', raw);
+            }
+            e.target.value = ""; sfx.playPlace();
+        } catch (err) {
+            alert("올바르지 않은 맵 파일 형식입니다."); e.target.value = "";
+        }
+    };
+    reader.readAsText(file);
+}
+
+function triggerDamageFlash() {
+    const flash = document.getElementById('damage-flash');
+    if (!flash) return;
+    flash.style.transition = 'none';
+    flash.style.opacity = '1';
+    flash.offsetHeight; 
+    flash.style.transition = 'opacity 0.5s ease-out';
+    flash.style.opacity = '0';
+}
+
+socket.on('init-state', (data) => {
+    worldData.fill(0);
+    for (const idx in data.blocks) worldData[idx] = data.blocks[idx];
+    mediaInfo = {};
+    if (data.media && typeof data.media === 'object') {
+        for (const k of Object.keys(data.media)) {
+            if (isSafeMediaInfo(data.media[k])) mediaInfo[k] = { url: data.media[k].url, kind: data.media[k].kind };
+        }
+    }
+    globalMode = data.globalMode || 'SAFE'; 
+    if (typeof data.freezeAll === 'boolean') updateFreezeUI(data.freezeAll);
+    if (isEngineInitialized) {
+        updateInstancedMeshes();
+        updateAdminUI();
+        updateNormalUserUI();
+        updateLifeGaugeVisibility();
+    }
+    initialPlayerData = data.players;
+    if (isEngineInitialized) syncInitialPlayers();
+    initStateSeen = true;
+    if (worldReadyTimer) clearTimeout(worldReadyTimer);
+    worldReadyTimer = setTimeout(markWorldReady, 10000); // 안전망: 10초 뒤 강제 해제 (최악 = 기존 동작)
+    if (isEngineInitialized) markWorldReady();
+});
+
+socket.on('player-joined', (data) => {
+    if (!isEngineInitialized) {
+        // 🌟 엔진 초기화 전(이름 입력 대기 중) 접속자는 버리지 않고 기록 —
+        //    입장 시 syncInitialPlayers가 일괄 생성하므로 "안 보이는" 문제가 사라짐
+        if (!initialPlayerData) initialPlayerData = {};
+        initialPlayerData[data.id] = data.player;
+        return;
+    }
+    if (!remotePlayers.has(data.id)) {
+        const isJjonji = data.player.isJjonji || false;
+        const remoteGroup = buildSteveCharacter(data.player.name, isJjonji, data.player.outfit);
+        const isZombie = data.player.isZombie || false;
+        scene.add(remoteGroup); // 🌟 [핵심 수정] 3D 장면에 확실하게 추가!
+        const initialTarget = new THREE.Vector3(data.player.x || 0, data.player.y || 0, data.player.z || 0);
+        remoteGroup.position.copy(initialTarget); // 🌟 초기 위치 즉시 동기화
+        remotePlayers.set(data.id, {
+            group: remoteGroup, target: initialTarget,
+            crawlProgress: 0, isCrawling: !!data.player.isCrawling,
+            isZombie: isZombie,
+            isJjonji: isJjonji,
+            name: data.player.name || 'Steve',
+            outfit: data.player.outfit || null,
+            parts: collectParts(remoteGroup) // 🌟 [C안 ②] 부위 캐싱
+        });
+        if (isZombie) zombifyCharacter(remoteGroup);
+        else {
+            // 🌟 새로 접속한(또는 재입장한) 플레이어의 남은 생명을 게이지에 반영
+            const g = remoteGroup.getObjectByName("lifeGauge");
+            if (g) for (let i = 0; i < 3; i++) g.children[i].visible = (i < (data.player.lives || 0));
+        }
+        updateLifeGaugeVisibility();
+    }
+});
+
+socket.on('player-moved', (data) => {
+    if (!isEngineInitialized) return;
+    const p = remotePlayers.get(data.id);
+    if (p) {
+        p.target.set(data.player.x, data.player.y, data.player.z);
+        p.group.rotation.y = data.player.rotY; p.isCrawling = data.player.isCrawling;
+    }
+});
+
+// 🌟 [P0-3] 소환 배치 수신: N회 broadcast 대신 1회로 전원 목표 좌표 갱신
+socket.on('summon-batch', (data) => {
+    if (!isEngineInitialized || !data || !Array.isArray(data.list)) return;
+    for (const m of data.list) {
+        if (!m || typeof m.id !== 'string') continue;
+        const p = remotePlayers.get(m.id);
+        if (p && Number.isFinite(m.x) && Number.isFinite(m.y) && Number.isFinite(m.z)) {
+            p.target.set(m.x, m.y, m.z);
+        }
+    }
+});
+
+socket.on('player-left', (data) => {
+    if (!isEngineInitialized) {
+        // 🌟 엔진 초기화 전에 퇴장한 플레이어는 입장 시 동기화 목록에서도 제거
+        if (initialPlayerData) delete initialPlayerData[data.id];
+        return;
+    }
+    const p = remotePlayers.get(data.id);
+    if (p) { scene.remove(p.group); remotePlayers.delete(data.id); }
+});
+
+socket.on('player-life-updated', (data) => {
+    if (data.id === socket.id) {
+        sfx.playHit(); // 🌟 피격 효과음은 피격자 본인 화면에서만
+        if (data.isZombie) {
+            myIsZombie = true;
+        } else if (myIsZombie) {
+            myIsZombie = false;
+            reviveLocalCharacter(); // 🌟 치료: 회색 좀비 → 정상 캐릭터 재생성
+        }
+        if (characterGroup) {
+            const gauge = characterGroup.getObjectByName("lifeGauge");
+            if (gauge) {
+                if (myIsZombie) {
+                    gauge.visible = false; // 🌟 좀비는 생명표시 제거
+                } else {
+                    for (let i = 0; i < 3; i++) { gauge.children[i].visible = (i < data.lives); }
+                }
+            }
+            if (myIsZombie) zombifyCharacter(characterGroup); // 🌟 회색음영 좀비로 변신
+        }
+        triggerDamageFlash();
+    } else {
+        const p = remotePlayers.get(data.id);
+        if (p && p.group) {
+            if (data.isZombie) {
+                p.isZombie = true;
+                zombifyCharacter(p.group);
+                const gauge = p.group.getObjectByName("lifeGauge");
+                if (gauge) gauge.visible = false;
+            } else {
+                if (p.isZombie) reviveRemoteCharacter(data.id, p); // 🌟 치료: 회색 좀비 → 정상 캐릭터 재생성
+                const gauge = p.group.getObjectByName("lifeGauge");
+                if (gauge) {
+                    for (let i = 0; i < 3; i++) { gauge.children[i].visible = (i < data.lives); }
+                }
+            }
+        }
+    }
+});
+
+// 🌟 좀비 치료 시 캐릭터 재생성 (회색 텍스처는 되돌릴 수 없어 새로 만듦 — 위치·방향 유지)
+function reviveLocalCharacter() {
+    if (!characterGroup || !scene) return;
+    const pos = characterGroup.position.clone();
+    const rotY = characterGroup.rotation.y;
+    scene.remove(characterGroup);
+    characterGroup = buildSteveCharacter(steveName, isEasterEgg);
+    characterGroup.position.copy(pos);
+    characterGroup.rotation.y = rotY;
+    scene.add(characterGroup);
+    localParts = collectParts(characterGroup);
+    updateLifeGaugeVisibility();
+}
+function reviveRemoteCharacter(id, p) {
+    if (!p || !p.group || !scene) return;
+    const pos = p.group.position.clone();
+    const rotY = p.group.rotation.y;
+    scene.remove(p.group);
+    const g = buildSteveCharacter(p.name || 'Steve', !!p.isJjonji, p.outfit);
+    g.position.copy(pos);
+    g.rotation.y = rotY;
+    scene.add(g);
+    p.group = g;
+    p.isZombie = false;
+    p.parts = collectParts(g);
+    updateLifeGaugeVisibility();
+}
+
+socket.on('mode-updated', (mode) => {
+    globalMode = mode;
+    updateAdminUI();            
+    updateNormalUserUI();       
+    updateLifeGaugeVisibility();
+});
+
+// 🌟 전체 동결 상태 표시 갱신 (쫀지 동결 버튼 하이라이트 + 일반 접속자 토스트 안내)
+function updateFreezeUI(frozen) {
+    freezeAll = !!frozen;
+    const freezeBtn = document.getElementById('freeze-all-btn');
+    if (freezeBtn && isEasterEgg) {
+        if (freezeAll) {
+            freezeBtn.classList.remove('bg-rose-950/40', 'text-rose-200', 'border-rose-900/30');
+            freezeBtn.classList.add('bg-cyan-600', 'text-white', 'border-cyan-400', 'shadow-[0_0_12px_rgba(6,182,212,0.8)]');
+        } else {
+            freezeBtn.classList.add('bg-rose-950/40', 'text-rose-200', 'border-rose-900/30');
+            freezeBtn.classList.remove('bg-cyan-600', 'text-white', 'border-cyan-400', 'shadow-[0_0_12px_rgba(6,182,212,0.8)]');
+        }
+    }
+}
+
+socket.on('freeze-updated', (frozen) => {
+    updateFreezeUI(frozen);
+    showToast(frozen ? "❄️ 관리자가 조종을 동결했습니다" : "🔓 동결이 해제되었습니다");
+});
+
+socket.on('block-changed', (data) => { 
+    if (!isEngineInitialized) {
+        const idx = data.index;
+        if (idx >= 0 && idx < MAP_SIZE) {
+            if (data.type === 'eraser') worldData[idx] = 0; else worldData[idx] = data.colorId;
+        }
+        return;
+    }
+    applyBlockChange(data); 
+});
+
+socket.on('blocks-cleared', () => { 
+    worldData.fill(0); 
+    mediaInfo = {}; // 🌟 미디어 링크도 함께 초기화
+    closeMediaModal();
+    if (isEngineInitialized) { updateInstancedMeshes(); } // 🌟 맵 초기화는 admin.html에서 수행 — 어떤 클라이언트에서도 소리 나지 않음
+});
+
+socket.on('pink-collision-event', () => {
+    sfx.playCelebration(); // 🌟 큐브블록 트랩/최후생존자 축하 연주 — 접속 전원이 들음
+});
+
+socket.on('map-reloaded', (blocks) => {
+    worldData.fill(0);
+    for (const idx in blocks) worldData[idx] = blocks[idx];
+    if (isEngineInitialized) updateInstancedMeshes();
+    if (isEngineInitialized) liftCharacterOutOfBlocks(); // 🌟 불러온 맵에 파묻히지 않도록 블록 위로 이동
+});
+
+// 🌟 미디어블록 링크 동기화 (등록·해제·전체 교체)
+socket.on('media-updated', (data) => {
+    if (!data || typeof data.index !== 'number') return;
+    if (isSafeMediaInfo(data.info)) mediaInfo[data.index] = { url: data.info.url, kind: data.info.kind };
+    if (data.index === currentMediaIdx) refreshMediaModal();
+});
+socket.on('media-removed', (data) => {
+    if (!data || typeof data.index !== 'number') return;
+    delete mediaInfo[data.index];
+    if (data.index === currentMediaIdx) refreshMediaModal();
+});
+socket.on('media-reloaded', (media) => {
+    mediaInfo = {};
+    if (media && typeof media === 'object') {
+        for (const k of Object.keys(media)) {
+            if (isSafeMediaInfo(media[k])) mediaInfo[k] = { url: media[k].url, kind: media[k].kind };
+        }
+    }
+    if (currentMediaIdx >= 0) refreshMediaModal();
+});
+
+socket.on('kicked', (msg) => { alert(msg || "강제 퇴장 처리되었습니다."); try { localStorage.removeItem('ksmsPlayerSession'); localStorage.removeItem('ksmsPlayerToken'); } catch (e) {} if (new URLSearchParams(window.location.search).get('admin') === '1') { history.replaceState(null, '', window.location.pathname); } location.reload(); });
+
+// 🌟 재입장 확정: 서버가 자신의 복원 상태(좀비 여부·남은 생명·마지막 위치)를 본인에게 알려줌
+//    (player-joined 브로드캐스트는 본인 제외라, 재입장자는 이 이벤트 없으면 자신이 좀비인지 모름)
+socket.on('join-accepted', (data) => {
+    if (!data || data.id !== socket.id || !data.player) return;
+    const wasReconnectRestore = isReconnectRestore;
+    // 🌟 입장 확정 → 접속번호를 기기에 저장 (다음 입장·재연결에 자동 사용)
+    try { if (joinedCode) localStorage.setItem('ksmsAccessCode', joinedCode); } catch (e) {}
+    const p = data.player;
+    if (p.isZombie) {
+        myIsZombie = true;
+        if (characterGroup) {
+            zombifyCharacter(characterGroup);
+            const gauge = characterGroup.getObjectByName("lifeGauge");
+            if (gauge) gauge.visible = false;
+        }
+    } else if (characterGroup) {
+        const gauge = characterGroup.getObjectByName("lifeGauge");
+        if (gauge) for (let i = 0; i < 3; i++) gauge.children[i].visible = (i < (p.lives || 0));
+    }
+if (charPhysics && typeof p.x === 'number') {
+        // 🌟 재연결 복원인 경우 로컬 위치 유지(끊긴 동안 계속 움직였으므로) — 이후 이동 패킷이 서버 위치를 즉시 갱신
+        if (!isReconnectRestore) {
+            charPhysics.position.set(p.x, p.y, p.z);
+            charPhysics.velocity.set(0, 0, 0);
+            if (characterGroup && Number.isFinite(p.rotY)) {
+                characterGroup.rotation.y = p.rotY; // 🌟 방향도 복원 (없으면 매 새로고침마다 최초 방향으로 리셋됨)
+                lastSentRotY = p.rotY;
+            }
+            liftCharacterOutOfBlocks(); // 🌟 서버에서 지정한 좌표에 블록이 있으면 즉시 블록 위로 안전 이동
+        }
+        charPhysics.isCrawling = !!p.isCrawling;
+        isReconnectRestore = false;
+        joinPositioned = true; // 서버 좌표 확정 (적용 또는 유효 로컬 확인) — 이후 방송 허용
+    }
+    // 🌟 재입장 진단: 적용 여부+로컬/서버 좌표를 서버 로그로 보고 (원인 확정용, 서버 REJOIN_DEBUG가 꺼져 있으면 무시됨)
+    try {
+        socket.emit('debug-rejoin', {
+            applied: !wasReconnectRestore,
+            local: charPhysics ? { x: +charPhysics.position.x.toFixed(2), y: +charPhysics.position.y.toFixed(2), z: +charPhysics.position.z.toFixed(2) } : null,
+            server: { x: p.x, y: p.y, z: p.z }
+        });
+    } catch (e) {}
+});
+
+// 🌟 접속번호 불일치: 새로고침 없이 번호만 다시 입력 (게임화면 진입 전으로 복귀)
+socket.on('code-rejected', () => {
+    tryEnterGame.entered = false;
+    document.getElementById('setup-modal').classList.remove('hidden');
+    document.getElementById('game-container').classList.add('hidden');
+    const codeInput = document.getElementById('accesscode-input');
+    if (codeInput) {
+        codeInput.classList.add('border-rose-500');
+        codeInput.focus();
+        codeInput.select();
+    }
+});
+
+// 🌟 전체 소환: 관리자가 소환 버튼을 누르면 서버가 보낸 좌표로 강제 이동
+socket.on('force-teleport', (data) => {
+    if (!data || typeof data.x !== 'number' || typeof data.y !== 'number' || typeof data.z !== 'number') return;
+    if (!isEngineInitialized || !charPhysics) return;
+    charPhysics.position.set(data.x, data.y, data.z);
+    charPhysics.velocity.set(0, 0, 0);
+    if (characterGroup) characterGroup.position.copy(charPhysics.position);
+    joinPositioned = true; // 강제 이동 좌표 확정 — 이후 방송 허용
+    liftCharacterOutOfBlocks(); // 🌟 소환 지점에 블록이 겹치면 블록 위로 안전 이동
+    showToast("📍 관리자가 소환했습니다!");
+    // 🌟 [P0-3] 서버 summon-batch로 전파되므로 즉시 재방출 생략 — 300ms 조용 구간 + 송신 상태 동기화
+    teleportQuietUntil = Date.now();
+    lastSentPos.copy(charPhysics.position);
+    if (characterGroup) lastSentRotY = characterGroup.rotation.y;
+    lastSentCrawl = charPhysics.isCrawling;
+    lastEmitTime = Date.now();
+});
+
+function handleJumpTrigger() {
+    if (freezeAll && !isEasterEgg) return; // 🌟 전체 동결 중 일반 접속자 점프 불가 (쫀지는 항상 가능)
+    if (!isEasterEgg && charPhysics.isGrounded) {
+        charPhysics.velocity.y = 0.14; charPhysics.isGrounded = false;
+    }
+}
+
+function setupTouchControls() {
+    const joystick = document.getElementById('mobile-joystick');
+    const knob = document.getElementById('joystick-knob');
+    let isJoyDragging = false;
+    
+    const handleStart = (clientX, clientY) => {
+        isJoyDragging = true; touchActive = true;
+        if (controls) { controls.enableZoom = false; controls.enablePan = false; }
+        const rect = joystick.getBoundingClientRect();
+        joystickStart.x = clientX - (rect.left + rect.width / 2);
+        joystickStart.y = clientY - (rect.top + rect.height / 2);
+    };
+    
+    const handleMove = (clientX, clientY) => {
+        if (!isJoyDragging) return;
+        const rect = joystick.getBoundingClientRect();
+        const curX = clientX - (rect.left + rect.width / 2), curY = clientY - (rect.top + rect.height / 2);
+        let dx = curX - joystickStart.x, dy = curY - joystickStart.y;
+        const maxDist = 48, dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > maxDist) { dx = (dx / dist) * maxDist; dy = (dy / dist) * maxDist; }
+        knob.style.transform = `translate(${dx}px, ${dy}px)`;
+        joystickDir.x = dx / maxDist; joystickDir.y = -dy / maxDist;
+    };
+    
+    const handleEnd = () => {
+        isJoyDragging = false; touchActive = false;
+        if (controls) { controls.enableZoom = true; controls.enablePan = true; }
+        knob.style.transform = `translate(0px, 0px)`; joystickDir.x = 0; joystickDir.y = 0;
+    };
+    
+    joystick.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); joystick.setPointerCapture(e.pointerId); handleStart(e.clientX, e.clientY); });
+    joystick.addEventListener('pointermove', (e) => { if (!isJoyDragging) return; e.stopPropagation(); e.preventDefault(); handleMove(e.clientX, e.clientY); });
+    const onPointerUp = (e) => { if (!isJoyDragging) return; e.stopPropagation(); e.preventDefault(); try { if (joystick.hasPointerCapture(e.pointerId)) joystick.releasePointerCapture(e.pointerId); } catch (_) {} handleEnd(); };
+    joystick.addEventListener('pointerup', onPointerUp); joystick.addEventListener('pointercancel', onPointerUp);
+    // 🌟 조이스틱 stuck 방지: 캡처 상실(시스템 제스처·멀티터치 끊김) 시에도 반드시 리셋 — 안 하면 touchActive가 true로 남아 계속 걸어감
+    joystick.addEventListener('lostpointercapture', () => { if (isJoyDragging) handleEnd(); });
+    // 🌟 창 포커스 상실(알림·멀티태스킹 전환) 시 조이스틱 상태 리셋
+    window.addEventListener('blur', () => { handleEnd(); });
+    
+    const jumpBtn = document.getElementById('mobile-jump-btn');
+    jumpBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); keys.flyUp = true; handleJumpTrigger(); });
+    const resetJump = (e) => { e.stopPropagation(); e.preventDefault(); keys.flyUp = false; };
+    jumpBtn.addEventListener('pointerup', resetJump); jumpBtn.addEventListener('pointercancel', resetJump); jumpBtn.addEventListener('pointerleave', resetJump);
+    
+    const crouchBtn = document.getElementById('mobile-crouch-btn');
+    crouchBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); keys.flyDown = true; });
+    const resetCrouch = (e) => { e.stopPropagation(); e.preventDefault(); keys.flyDown = false; };
+    crouchBtn.addEventListener('pointerup', resetCrouch); crouchBtn.addEventListener('pointercancel', resetCrouch); crouchBtn.addEventListener('pointerleave', resetCrouch);
+}
+
+function selectHotbar(index) {
+    activeHotbarIndex = index;
+    const slots = document.querySelectorAll('.hotbar-slot');
+    slots.forEach(slot => slot.classList.remove('active'));
+    
+    const activeSlot = document.querySelector(`.hotbar-slot[data-index="${index}"]`);
+    if (activeSlot) {
+        activeSlot.classList.add('active');
+        if (activeSlot.getAttribute('data-type') === 'eraser') {
+            selectedToolType = 'eraser';
+        } else {
+            selectedToolType = 'block'; selectedColor = activeSlot.getAttribute('data-value');
+        }
+    }
+}
+
+function setupEventListeners() {
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeMediaModal(); return; } // 🌟 미디어 팝업 닫기
+        // 🌟 입력창(URL 등)에 타이핑 중이면 게임 단축키 무시
+        //    단 줌 슬라이더는 키보드와 분리: 포커스가 남아 있어도 방향키는 캐릭터 이동, 슬라이더 값은 안 변함
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+            if (e.target.id !== 'zoom-slider') return;
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) { e.preventDefault(); e.target.blur(); }
+        }
+        // 🌟 미디어 팝업이 열려 있으면 이동·점프·단축키 입력 무시 (닫은 뒤 정상 재개)
+        if (isMediaModalOpen()) return;
+        const key = e.key.toLowerCase();
+        if (key === 'w' || e.key === 'ArrowUp') keys.w = true;
+        if (key === 's' || e.key === 'ArrowDown') keys.s = true;
+        if (key === 'a' || e.key === 'ArrowLeft') keys.a = true;
+        if (key === 'd' || e.key === 'ArrowRight') keys.d = true;
+        if (e.key === ' ') { keys.flyUp = true; handleJumpTrigger(); e.preventDefault(); }
+        if (e.key === 'Shift') { keys.flyDown = true; e.preventDefault(); }
+        if (/[1-9]/.test(e.key)) selectHotbar(parseInt(e.key) - 1);
+        else if (e.key === '0') selectHotbar(9);
+        else if (e.key === '-' || e.key === '_') selectHotbar(10);
+        else if (e.key === '=' || e.key === '+') selectHotbar(12);
+    });
+    
+    window.addEventListener('keyup', (e) => {
+        const key = e.key.toLowerCase();
+        if (key === 'w' || e.key === 'ArrowUp') keys.w = false;
+        if (key === 's' || e.key === 'ArrowDown') keys.s = false;
+        if (key === 'a' || e.key === 'ArrowLeft') keys.a = false;
+        if (key === 'd' || e.key === 'ArrowRight') keys.d = false;
+        if (e.key === ' ') keys.flyUp = false;
+        if (e.key === 'Shift') keys.flyDown = false;
+    });
+
+    // 🌟 키 stuck 방지: 창 포커스를 잃으면(Alt+Tab·전체화면 전환·개발자도구 클릭 등) keyup이 씹혀
+    //    keys.* 가 true로 영구히 남아 손을 떼도 한 방향으로 계속 걸어감 — blur/백그라운드 시 전체 리셋
+    const resetStuckInputs = () => {
+        keys.w = keys.a = keys.s = keys.d = false;
+        keys.flyUp = keys.flyDown = false;
+        touchActive = false; joystickDir.x = 0; joystickDir.y = 0;
+        const knob = document.getElementById('joystick-knob');
+        if (knob) knob.style.transform = 'translate(0px, 0px)';
+    };
+    window.addEventListener('blur', resetStuckInputs);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) resetStuckInputs(); });
+
+    const canvas = document.getElementById('game-canvas');
+    let isPointerActive = false, pointerStartX = 0, pointerStartY = 0, pointerMoved = false;
+    let isTouchRotating = false, touchRotateStartX = 0, touchRotateStartY = 0, activeRotatePointerId = null;
+    
+    canvas.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        isPointerActive = true; pointerMoved = false;
+        pointerStartX = e.clientX; pointerStartY = e.clientY;
+        if (e.pointerType === 'touch' && activeRotatePointerId === null) {
+            activeRotatePointerId = e.pointerId; isTouchRotating = true;
+            touchRotateStartX = e.clientX; touchRotateStartY = e.clientY;
+            controls.enabled = false;
+        }
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+        if (!isPointerActive) return;
+        const dx = e.clientX - pointerStartX, dy = e.clientY - pointerStartY;
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) pointerMoved = true;
+
+        if (isTouchRotating && e.pointerType === 'touch' && e.pointerId === activeRotatePointerId) {
+            const deltaX = e.clientX - touchRotateStartX, deltaY = e.clientY - touchRotateStartY;
+            touchRotateStartX = e.clientX; touchRotateStartY = e.clientY;
+            const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+            const spherical = new THREE.Spherical().setFromVector3(offset);
+            spherical.theta -= deltaX * 0.005; spherical.phi -= deltaY * 0.005;
+            spherical.phi = Math.max(controls.minPolarAngle, Math.min(controls.maxPolarAngle, spherical.phi));
+            spherical.makeSafe(); offset.setFromSpherical(spherical);
+            camera.position.copy(controls.target).add(offset); camera.lookAt(controls.target);
+        }
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+    
+    const endTouchRotation = (e) => {
+        if (e && e.pointerId !== activeRotatePointerId) return;
+        isPointerActive = false; if (isTouchRotating) { isTouchRotating = false; controls.enabled = true; }
+        activeRotatePointerId = null;
+    };
+
+    canvas.addEventListener('pointerup', (e) => {
+        if (!isPointerActive) return;
+        const isTarget = (e.pointerId === activeRotatePointerId); endTouchRotation(e);
+        if (!pointerMoved && (e.pointerType === 'mouse' || isTarget)) {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1; 
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const playerGroups = Array.from(remotePlayers.values()).map(p => p.group);
+            const playerIntersects = raycaster.intersectObjects(playerGroups, true);
+            
+            if (playerIntersects.length > 0) {
+                let hitObject = playerIntersects[0].object;
+                let targetPlayerId = null;
+                
+                for (const [id, p] of remotePlayers.entries()) {
+                    let current = hitObject;
+                    while(current) {
+                        if (current === p.group) { targetPlayerId = id; break; }
+                        current = current.parent;
+                    }
+                    if (targetPlayerId) break;
+                }
+                
+                if (targetPlayerId) {
+                    const targetPlayer = remotePlayers.get(targetPlayerId);
+                    // 🌟 쫀지(무적)와 좀비(피격 불가)는 공격 대상에서 제외 — 서버 거부 + 유령 소리 방지
+                    if (targetPlayer.isJjonji || targetPlayer.isZombie) return;
+                    if (freezeAll && !isEasterEgg) return; // 🌟 전체 동결 중 일반 접속자 공격 불가 (쫀지는 항상 가능)
+                    const distToTarget = characterGroup.position.distanceTo(targetPlayer.group.position);
+                    
+                    if (globalMode === 'ATTACK') {
+                        if (isEasterEgg || distToTarget <= 5.0) {
+                            // 🌟 벽 관통 차단: 2칸 이상 벽 뒤는 공격 불가 (서 있으면 1칸 벽 너머 가능)
+                            if (!isEasterEgg && isWallBetweenEyes(targetPlayer)) {
+                                showToast("🧱 벽에 막혀 공격할 수 없습니다");
+                                return;
+                            }
+                            socket.emit('player-attack', { targetId: targetPlayerId });
+                            sfx.playHit(); // 🌟 공격 효과음은 공격자 화면에서만
+                        }
+                    }
+                    return; 
+                }
+            }
+            
+            handleInteract();
+        }
+    });
+
+    canvas.addEventListener('pointercancel', endTouchRotation); canvas.addEventListener('pointerleave', endTouchRotation);
+
+    const uiContainers = [
+        document.getElementById('mobile-joystick'), document.getElementById('mobile-jump-btn'),
+        document.getElementById('mobile-crouch-btn'), document.getElementById('hotbar-container'),
+        document.getElementById('fullscreen-btn'), document.getElementById('capture-btn'),
+        document.getElementById('photo-btn'), document.getElementById('save-btn'),
+        document.getElementById('load-btn'), document.getElementById('zoom-slider'),
+        document.getElementById('view-toggle-btn'), document.getElementById('admin-mode-controls'),
+        document.getElementById('quality-btn'), document.getElementById('summon-all-btn'),
+        document.getElementById('freeze-all-btn')
+    ];
+    uiContainers.forEach(el => {
+        if (el) {
+            el.addEventListener('pointerdown', e => e.stopPropagation()); el.addEventListener('pointerup', e => e.stopPropagation());
+            el.addEventListener('pointermove', e => e.stopPropagation()); el.addEventListener('touchmove', e => e.stopPropagation(), { passive: true });
+        }
+    });
+
+    document.querySelectorAll('.hotbar-slot').forEach(slot => { slot.addEventListener('click', (e) => { e.stopPropagation(); selectHotbar(parseInt(slot.getAttribute('data-index'))); }); });
+
+    const zoomSlider = document.getElementById('zoom-slider');
+    zoomSlider.addEventListener('input', (e) => {
+        const targetDist = 19 - parseFloat(e.target.value);
+        const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+        camera.position.copy(controls.target).addScaledVector(dir, targetDist);
+        controls.update();
+    });
+    zoomSlider.addEventListener('change', (e) => { e.target.blur(); }); // 드래그 끝나면 포커스 해제 (방향키가 캐릭터로 돌아감)
+
+    // 🌟 iPad 더블탭 확대 차단: 상단바에서 350ms 내 두 번째 터치의 기본 동작(페이지 줌)만 차단 (단일 탭 클릭은 정상)
+    let lastTopBarTouchEnd = 0;
+    const topBarEl = document.getElementById('top-bar');
+    if (topBarEl) topBarEl.addEventListener('touchend', (e) => {
+        const nowMs = Date.now();
+        if (nowMs - lastTopBarTouchEnd < 350) e.preventDefault();
+        lastTopBarTouchEnd = nowMs;
+    }, { passive: false });
+
+    document.getElementById('view-toggle-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        isFirstPerson = !isFirstPerson;
+        characterGroup.visible = !isFirstPerson; 
+        
+        const icon = document.getElementById('view-toggle-icon');
+        if (isFirstPerson) {
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+            controls.minDistance = 0.01;
+            controls.maxDistance = 0.01;
+            controls.minPolarAngle = Math.PI * (1 / 180); 
+            controls.maxPolarAngle = Math.PI * (179 / 180); 
+            zoomSlider.disabled = true;
+            zoomSlider.parentElement.style.opacity = '0.5';
+            
+            const rotY = characterGroup.rotation.y;
+            const forward = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY)).normalize();
+            
+            const targetYOffset = lerp(1.5, 0.45, charPhysics.crawlProgress);
+            const absoluteTarget = charPhysics.position.clone().add(new THREE.Vector3(0, targetYOffset, 0));
+            
+            controls.target.copy(absoluteTarget);
+            camera.position.copy(absoluteTarget).addScaledVector(forward, -0.01);
+            controls.update();
+        } else {
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+            controls.minDistance = 4;
+            controls.maxDistance = 15;
+            controls.minPolarAngle = Math.PI * (1 / 180);
+            controls.maxPolarAngle = Math.PI * (75 / 180); 
+            zoomSlider.disabled = false;
+            zoomSlider.parentElement.style.opacity = '1';
+            
+            const targetDist = 19 - parseFloat(zoomSlider.value);
+            
+            const rotY = characterGroup.rotation.y;
+            const dir = new THREE.Vector3(-Math.sin(rotY), 0.3, -Math.cos(rotY)).normalize();
+            
+            const targetYOffset = 1.0;
+            const absoluteTarget = charPhysics.position.clone().add(new THREE.Vector3(0, targetYOffset, 0));
+            
+            controls.target.copy(absoluteTarget);
+            camera.position.copy(absoluteTarget).addScaledVector(dir, targetDist);
+            controls.update(); 
+        }
+    });
+
+    // 🌟 [쫀지 전용] 투명인간(블록 통과) 버튼 이벤트 리스너
+    const ghostBtn = document.getElementById('ghost-toggle-btn');
+    if (ghostBtn) {
+        ghostBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            ghostMode = !ghostMode;
+            if (ghostMode) {
+                ghostBtn.classList.remove('bg-rose-950/40', 'text-rose-200', 'border-rose-900/30');
+                ghostBtn.classList.add('bg-cyan-600', 'text-white', 'border-cyan-400', 'shadow-[0_0_12px_rgba(6,182,212,0.8)]');
+                showToast("👻 투명인간 모드 활성화 (블록 통과)");
+            } else {
+                ghostBtn.classList.add('bg-rose-950/40', 'text-rose-200', 'border-rose-900/30');
+                ghostBtn.classList.remove('bg-cyan-600', 'text-white', 'border-cyan-400', 'shadow-[0_0_12px_rgba(6,182,212,0.8)]');
+                showToast("🚶 일반 모드 (블록 통과 불가)");
+            }
+        });
+    }
+
+    // 🌟 [쫀지 전용] 전체 소환: 모든 접속자를 관리자 캐릭터 위치로 강제소환
+    const summonBtn = document.getElementById('summon-all-btn');
+    if (summonBtn) {
+        summonBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!isEasterEgg || !isEngineInitialized) return;
+            socket.emit('admin-summon-all', {
+                x: charPhysics.position.x,
+                y: charPhysics.position.y,
+                z: charPhysics.position.z
+            });
+            showToast("📍 모든 접속자를 소환했습니다");
+        });
+    }
+
+    // 🌟 [쫀지 전용] 전체 동결/해제: 버튼을 누르면 모든 일반 접속자 조종 불가
+    const freezeBtn = document.getElementById('freeze-all-btn');
+    if (freezeBtn) {
+        freezeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!isEasterEgg || !isEngineInitialized) return;
+            socket.emit('admin-toggle-freeze');
+        });
+    }
+
+    document.querySelectorAll('.admin-mode-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const mode = btn.getAttribute('data-mode');
+            socket.emit('change-mode', mode);
+        });
+    });
+
+    document.getElementById('quality-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const next = (currentQuality === 'HIGH') ? 'MID' : (currentQuality === 'MID' ? 'LOW' : 'HIGH');
+        applyQuality(next);
+        const toast = document.getElementById('toast');
+        if (toast) { toast.textContent = `화질: ${QUALITY_LABELS[next]}`; toast.classList.remove('opacity-0'); setTimeout(() => toast.classList.add('opacity-0'), 1200); }
+    });
+
+    document.getElementById('save-btn').addEventListener('click', e => { e.stopPropagation(); saveWorldToFile(); });
+    const loadBtn = document.getElementById('load-btn'), fInput = document.getElementById('file-input');
+    loadBtn.addEventListener('click', e => { e.stopPropagation(); fInput.click(); }); fInput.addEventListener('change', loadWorldFromFile);
+
+    document.getElementById('capture-btn').addEventListener('click', (e) => {
+        e.stopPropagation(); renderer.render(scene, camera);
+        const now = new Date(), yy = String(now.getFullYear()).slice(-2), mm = String(now.getMonth() + 1).padStart(2, '0'), dd = String(now.getDate()).padStart(2, '0'), hh = String(now.getHours()).padStart(2, '0'), min = String(now.getMinutes()).padStart(2, '0'), ss = String(now.getSeconds()).padStart(2, '0');
+        const link = document.createElement('a'); link.href = renderer.domElement.toDataURL('image/png'); link.download = `KSMS-${yy}${mm}${dd}-${hh}${min}${ss}.png`; link.click();
+    });
+
+    document.getElementById('photo-btn').addEventListener('click', (e) => {
+        e.stopPropagation(); renderer.render(scene, camera);
+        const newTab = window.open();
+        if (newTab) {
+            newTab.document.write(`<html><body style="margin:0; background:#000; display:flex; align-items:center; justify-content:center; height:100vh;"><img src="${renderer.domElement.toDataURL('image/png')}" style="max-width:100%; max-height:100%;"/></body></html>`);
+            newTab.document.close();
+        }
+    });
+
+    const fsBtn = document.getElementById('fullscreen-btn');
+    fsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().then(() => { fsBtn.innerHTML = '<i class="fa-solid fa-compress text-sm"></i>'; });
+        } else {
+            document.exitFullscreen().then(() => { fsBtn.innerHTML = '<i class="fa-solid fa-expand text-sm"></i>'; });
+        }
+    });
+    // 입장 시 자동 전체화면 등 프로그램에 의한 전환에도 버튼 아이콘을 동기화
+    document.addEventListener('fullscreenchange', () => {
+        fsBtn.innerHTML = document.fullscreenElement
+            ? '<i class="fa-solid fa-compress text-sm"></i>'
+            : '<i class="fa-solid fa-expand text-sm"></i>';
+    });
+    window.addEventListener('resize', onWindowResize);
+}
+
+function onWindowResize() {
+    const width = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    const height = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height);
+}
+
+function lerp(start, end, amt) { return (1 - amt) * start + amt * end; }
+
+function updatePhysics() {
+    if (!isEngineInitialized) return;
+    // 🌟 미디어 팝업이 열려 있으면 캐릭터 완전 정지 (이동·점프·중력·트랩 판정 모두 중단, 닫으면 즉시 재개)
+    if (isMediaModalOpen()) return;
+    prevCharPos.copy(charPhysics.position);
+    const now = Date.now();
+    
+    if (isEasterEgg) {
+        charPhysics.velocity.y = 0; charPhysics.isGrounded = false;
+        
+        let vMove = 0;
+        if (keys.flyUp) vMove = 0.08;
+        else if (keys.flyDown) vMove = -0.08;
+        
+        let tY = charPhysics.position.y + vMove;
+        if (tY < 0.0) { tY = 0.0; }
+        // 🌟 [쫀지] 투명인간 모드가 꺼져 있으면 블록과 충돌하여 Y 이동이 막힘
+        if (!ghostMode && checkCollision(charPhysics.position.x, tY, charPhysics.position.z)) {
+            tY = charPhysics.position.y;
+        }
+        charPhysics.position.y = tY;
+        
+        // 🌟 [쫀지] 발밑(바닥 또는 블록 위) 접지 판정
+        const isOnGround = (charPhysics.position.y <= 0.01) || (!ghostMode && checkCollision(charPhysics.position.x, charPhysics.position.y - 0.1, charPhysics.position.z, false));
+        
+        if (!ghostMode) {
+            // 🌟 머리 위 천장이 막혀 일어설 수 없으면 기어가기 강제 유지
+            const cannotStandUp = checkCollision(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z, false);
+            if (keys.flyDown && isOnGround || cannotStandUp) {
+                charPhysics.isCrawling = true;
+            } else {
+                charPhysics.isCrawling = false;
+            }
+        } else {
+            // 투명인간 켜짐: 블록을 자유 통과하므로 잔디 바닥에서만 기어가기
+            charPhysics.isCrawling = (charPhysics.position.y <= 0.01 && keys.flyDown);
+        }
+    } else {
+        const isFreeFly = (globalMode === 'FLIGHT'); 
+        const movementFrozen = (freezeAll && !isEasterEgg); // 🌟 전체 동결 중 일반 접속자 상하 이동 입력 무시 (쫀지는 위 분기라 영향 없음)
+
+        if (isFreeFly) {
+            charPhysics.velocity.y = 0; charPhysics.isGrounded = false;
+            let vMove = 0;
+            if (!movementFrozen) {
+                if (keys.flyUp) vMove = 0.08;
+                else if (keys.flyDown) vMove = -0.08;
+            }
+
+            if (vMove !== 0) {
+                let tY = charPhysics.position.y + vMove;
+                if (tY < 0.0) { 
+                    tY = 0.0; charPhysics.isGrounded = true; 
+                } else if (checkCollision(charPhysics.position.x, tY, charPhysics.position.z, null, 0.02)) {
+                    tY = charPhysics.position.y;
+                }
+                charPhysics.position.y = tY;
+            }
+            
+            const isOnGround = (charPhysics.position.y <= 0.01) || checkCollision(charPhysics.position.x, charPhysics.position.y - 0.1, charPhysics.position.z, false);
+            const cannotStandUp = checkCollision(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z, false);
+            
+            if (keys.flyDown && isOnGround || cannotStandUp) {
+                charPhysics.isCrawling = true;
+            } else {
+                charPhysics.isCrawling = false;
+            }
+        } else {
+            // 🌟 [일반 중력 모드] 머리 위 천장 블록이 있으면 일어서지 못하고 기어가기 강제 유지!
+            const cannotStandUp = checkCollision(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z, false);
+            charPhysics.isCrawling = (!movementFrozen && keys.flyDown || cannotStandUp);
+
+            if (movementFrozen) {
+                // 🌟 동결 중에는 공중에 멈춤 (중력 낙하 없음) — 해제하면 그 자리에서 이어짐
+                charPhysics.velocity.set(0, 0, 0);
+            } else {
+                charPhysics.velocity.y -= charPhysics.gravity;
+                if (charPhysics.velocity.y < -0.35) charPhysics.velocity.y = -0.35; // 낙하 종속도 (무한 가속·바닥 터널링 차단)
+                let tY = charPhysics.position.y + charPhysics.velocity.y;
+
+                if (tY < 0.0) {
+                    tY = 0.0; charPhysics.velocity.y = 0; charPhysics.isGrounded = true;
+                } else {
+                    if (charPhysics.velocity.y < 0 && checkCollision(charPhysics.position.x, tY, charPhysics.position.z, null, 0.02)) {
+                        tY = Math.floor(charPhysics.position.y); charPhysics.velocity.y = 0; charPhysics.isGrounded = true;
+                    } else if (charPhysics.velocity.y > 0 && checkCollision(charPhysics.position.x, tY, charPhysics.position.z, null, 0.02)) {
+                        charPhysics.velocity.y = 0; tY = charPhysics.position.y;
+                    } else charPhysics.isGrounded = false;
+                }
+                charPhysics.position.y = tY;
+            }
+        }
+
+        if (charPhysics.position.y > 61.0) {
+            charPhysics.position.y = 61.0;
+            if (charPhysics.velocity.y > 0) charPhysics.velocity.y = 0;
+        }
+    }
+
+    let moveX = 0, moveZ = 0;
+    if (!(freezeAll && !isEasterEgg)) { if (keys.w) moveZ -= 1; if (keys.s) moveZ += 1; if (keys.a) moveX -= 1; if (keys.d) moveX += 1; if (touchActive) { moveX = joystickDir.x; moveZ = -joystickDir.y; } }
+
+    const moveVector = tmpMove.set(moveX, 0, moveZ);
+    let isMoving = moveVector.lengthSq() > 0;
+    
+    if (isMoving) {
+        moveVector.normalize();
+        const camDir = tmpCamDir; camera.getWorldDirection(camDir); camDir.y = 0;
+        if (camDir.lengthSq() < 0.0001) camDir.set(0, 0, -1); else camDir.normalize();
+        const camRight = tmpCamRight.crossVectors(camera.up, camDir).normalize().negate();
+        const finalDir = tmpFinalDir.addScaledVector(camDir, -moveZ).addScaledVector(camRight, moveX).normalize();
+        
+        const speed = charPhysics.isCrawling ? charPhysics.speed * 0.5 : charPhysics.speed;
+        const targetX = charPhysics.position.x + finalDir.x * speed;
+        const targetZ = charPhysics.position.z + finalDir.z * speed;
+        
+        if (!checkCollision(targetX, charPhysics.position.y, charPhysics.position.z)) charPhysics.position.x = targetX;
+        if (!checkCollision(charPhysics.position.x, charPhysics.position.y, targetZ)) charPhysics.position.z = targetZ;
+        
+        characterGroup.rotation.y = Math.atan2(finalDir.x, finalDir.z);
+    }
+    
+    const edgeLimit = FLOOR_SIZE / 2 - 1;
+    if (charPhysics.position.x > edgeLimit) charPhysics.position.x = edgeLimit;
+    if (charPhysics.position.x < -edgeLimit) charPhysics.position.x = -edgeLimit;
+    if (charPhysics.position.z > edgeLimit) charPhysics.position.z = edgeLimit;
+    if (charPhysics.position.z < -edgeLimit) charPhysics.position.z = -edgeLimit;
+    
+    characterGroup.position.copy(charPhysics.position);
+    
+    // 🌟 큐브블록 트랩: 안전모드/공격모드에서만, 일반(좀비 아님) 플레이어만 발동 — 축하음은 서버 이벤트로 전원 재생
+    // 🌟 [C안 ⑤] 큐브블록이 맵에 없으면 매 프레임 240칸 트랩 스캔을 통째로 생략
+    // 🌟 전체 동결 중에는 일반 접속자 트랩 발동도 차단 (쫀지는 원래 트랩 면역)
+    if (pinkBlockCount > 0 && !isEasterEgg && !freezeAll && !myIsZombie && (globalMode === 'SAFE' || globalMode === 'ATTACK') && checkPinkBlockCollision(charPhysics.position.x, charPhysics.position.y, charPhysics.position.z)) {
+        if (!lastPinkCollided) { socket.emit('trigger-pink-collision'); lastPinkCollided = true; }
+    } else { lastPinkCollided = false; }
+    
+    if (sunLight && characterGroup) {
+        sunLight.position.set(charPhysics.position.x + 30, charPhysics.position.y + 60, charPhysics.position.z + 15);
+        sunLight.target = characterGroup;
+    }
+    
+    // 🌟 [P0-1] 틱 슬리밍: 움직임 있을 때만 10Hz, 정지 시 500ms heartbeat (20Hz 상시 → 약 1/20)
+    const sentDX = charPhysics.position.x - lastSentPos.x;
+    const sentDY = charPhysics.position.y - lastSentPos.y;
+    const sentDZ = charPhysics.position.z - lastSentPos.z;
+    const sentDR = characterGroup ? Math.abs(characterGroup.rotation.y - lastSentRotY) : 0;
+    const moved = (sentDX * sentDX + sentDY * sentDY + sentDZ * sentDZ) > 0.0025
+        || sentDR > 0.02 || (charPhysics.isCrawling !== lastSentCrawl);
+    if (worldReady && joinPositioned && now - lastEmitTime > (moved ? 100 : 500)) {
+        if (now < teleportQuietUntil) {
+            // 🌟 [P0-3] 소환 직후 300ms: 서버 배치로 이미 전파됐으므로 재전송 생략 (N² 여파 차단)
+        } else {
+            socket.emit('player-move', { x: charPhysics.position.x, y: charPhysics.position.y, z: charPhysics.position.z, rotY: characterGroup.rotation.y, isCrawling: charPhysics.isCrawling });
+        }
+        lastSentPos.copy(charPhysics.position);
+        if (characterGroup) lastSentRotY = characterGroup.rotation.y;
+        lastSentCrawl = charPhysics.isCrawling;
+        lastEmitTime = now;
+    }
+    
+    const cp = charPhysics.crawlProgress = lerp(charPhysics.crawlProgress, charPhysics.isCrawling ? 1.0 : 0.0, 0.15);
+    // 🌟 [C안 ②] 부위 참조 캐싱 — getObjectByName(씬 트리 순회) 8회/프레임 제거
+    const P = localParts || {};
+    const head = P.head, torso = P.torso,
+          lL = P.lL, rL = P.rL,
+          lA = P.lA, rA = P.rA,
+          np = P.np,
+          lifeGauge = P.lifeGauge;
+          
+    let swing = isMoving ? Math.sin(now * 0.012) * 0.5 : 0;
+    const crawlSwing = swing * lerp(1.0, 0.5, cp); 
+
+    if (torso && head && lL && rL && lA && rA) {
+        torso.scale.set(1, lerp(1.0, 0.5, cp), 1);
+        torso.position.y = lerp(0.7, 0.22, cp); torso.position.z = lerp(0, -0.1, cp); torso.rotation.x = lerp(0, Math.PI / 2, cp);
+        
+        head.position.y = lerp(1.5, 0.45, cp); head.position.z = lerp(0, 0.4, cp); head.rotation.x = lerp(0, -Math.PI / 12, cp);
+        
+        lL.scale.set(1, lerp(1.0, 0.5, cp), 1); rL.scale.set(1, lerp(1.0, 0.5, cp), 1);
+        lL.position.y = lerp(0.4, 0.22, cp); rL.position.y = lerp(0.4, 0.22, cp);
+        lL.position.z = lerp(0, -0.15, cp); rL.position.z = lerp(0, -0.15, cp);
+        
+        lA.position.y = lerp(1.0, 0.22, cp); rA.position.y = lerp(1.0, 0.22, cp);
+        lA.position.z = lerp(0, 0.35, cp); rA.position.z = lerp(0, 0.35, cp);
+        
+        if (np) { np.position.y = lerp(2.6, 1.2, cp); np.position.z = lerp(0, 0.4, cp); np.quaternion.copy(camera.quaternion); }
+        
+        if (lifeGauge) { 
+            lifeGauge.position.y = lerp(2.2, 1.0, cp); 
+            lifeGauge.position.z = lerp(0, 0.4, cp); 
+            lifeGauge.quaternion.copy(characterGroup.quaternion).invert().multiply(camera.quaternion); 
+        }
+
+        lL.rotation.x = lerp(0, Math.PI / 2, cp) + crawlSwing;
+        rL.rotation.x = lerp(0, Math.PI / 2, cp) - crawlSwing;
+        lA.rotation.x = lerp(0, -Math.PI / 2, cp) - crawlSwing;
+        rA.rotation.x = lerp(0, -Math.PI / 2, cp) + crawlSwing;
+    }
+    
+    remotePlayers.forEach((p, id) => {
+        p.group.position.lerp(p.target, 0.2); // 🌟 [C안 ④] 50ms 동기화 주기에 맞춘 보간 보정
+        const P = p.parts || {};
+
+        // 🌟 [C안 ③] '저' 화질 + 12칸 밖 먼 캐릭터: 포즈·팔다리 계산 생략 (위치·이름표만 갱신)
+        if ((currentQuality === 'LOW') && (camera.position.distanceToSquared(p.group.position) > 144)) {
+            if (P.np) P.np.quaternion.copy(camera.quaternion);
+            return;
+        }
+
+        const rcp = p.crawlProgress = lerp(p.crawlProgress, p.isCrawling ? 1.0 : 0.0, 0.15);
+        
+        const dist = p.group.position.distanceTo(p.target);
+        const isRemoteMoving = dist > 0.02;
+        let rSwing = isRemoteMoving ? Math.sin(now * 0.012) * 0.5 : 0;
+        const rCrawlSwing = rSwing * lerp(1.0, 0.5, rcp);
+
+        const rHead = P.head, rTorso = P.torso,
+              rL_L = P.lL, rR_L = P.rL,
+              rL_A = P.lA, rR_A = P.rA,
+              rNp = P.np,
+              rLifeGauge = P.lifeGauge;
+              
+        if (rTorso && rHead && rL_L && rR_L && rL_A && rR_A) {
+            rTorso.scale.set(1, lerp(1.0, 0.5, rcp), 1);
+            rTorso.position.y = lerp(0.7, 0.22, rcp); rTorso.position.z = lerp(0, -0.1, rcp); rTorso.rotation.x = lerp(0, Math.PI / 2, rcp);
+            
+            rHead.position.y = lerp(1.5, 0.45, rcp); rHead.position.z = lerp(0, 0.4, rcp); rHead.rotation.x = lerp(0, -Math.PI / 12, rcp);
+            
+            rL_L.scale.set(1, lerp(1.0, 0.5, rcp), 1); rR_L.scale.set(1, lerp(1.0, 0.5, rcp), 1);
+            rL_L.position.y = lerp(0.4, 0.22, rcp); rR_L.position.y = lerp(0.4, 0.22, rcp);
+            rL_L.position.z = lerp(0, -0.15, rcp); rR_L.position.z = lerp(0, -0.15, rcp);
+            
+            rL_A.position.y = lerp(1.0, 0.22, rcp); rR_A.position.y = lerp(1.0, 0.22, rcp);
+            rL_A.position.z = lerp(0, 0.35, rcp); rR_A.position.z = lerp(0, 0.35, rcp);
+            
+            if (rNp) { 
+                rNp.position.y = lerp(2.6, 1.2, rcp); 
+                rNp.position.z = lerp(0, 0.4, rcp);
+                rNp.quaternion.copy(camera.quaternion); 
+            }
+            
+            if (rLifeGauge) {
+                rLifeGauge.position.y = lerp(2.2, 1.0, rcp);
+                rLifeGauge.position.z = lerp(0, 0.4, rcp);
+                rLifeGauge.quaternion.copy(p.group.quaternion).invert().multiply(camera.quaternion); 
+            }
+
+            rL_L.rotation.x = lerp(0, Math.PI / 2, rcp) + rCrawlSwing;
+            rR_L.rotation.x = lerp(0, Math.PI / 2, rcp) - rCrawlSwing;
+            rL_A.rotation.x = lerp(0, -Math.PI / 2, rcp) - rCrawlSwing;
+            rR_A.rotation.x = lerp(0, -Math.PI / 2, rcp) + rCrawlSwing;
+        }
+    });
+    
+    let targetYOffset = isFirstPerson ? lerp(1.5, 0.45, charPhysics.crawlProgress) : 1.0;
+    const absoluteTarget = tmpCamTarget.copy(charPhysics.position); absoluteTarget.y += targetYOffset;
+    let offset = tmpCamOffset.subVectors(camera.position, controls.target);
+    if (isFirstPerson) offset.normalize().multiplyScalar(0.01);
+    
+    controls.target.copy(absoluteTarget); camera.position.copy(absoluteTarget).add(offset);
+    
+    const zSlider = document.getElementById('zoom-slider');
+    if (zSlider && document.activeElement !== zSlider && !isFirstPerson) zSlider.value = Math.round(19 - offset.length());
+}
+
+let lastRenderTime = 0;
+// 🌟 화질별 렌더 fps 캡 — 고 60fps, 중·저 30fps (물리·이동은 매 프레임 유지해 이동속도 불변, 렌더만 솎아 GPU 부하 절감)
+function qualityFrameInterval(q) {
+    return (q === 'HIGH') ? 16.7 : 33.4;
+}
+function animate() {
+    requestAnimationFrame(animate);
+    updatePhysics();
+    if (controls) controls.update();
+    const nowMs = performance.now();
+    if (nowMs - lastRenderTime < qualityFrameInterval(currentQuality)) return;
+    lastRenderTime = nowMs;
+    flushDirtyBlocks(); // 🌟 증분 갱신: 프레임 내 변경 슬롯을 렌더 직전에 묶음 업로드
+    if (scene && camera && renderer) renderer.render(scene, camera);
+}
+
+// iOS/iPadOS 페이지 확대(핀치줌) 차단 — iPad Chrome도 내부적으로 WebKit 엔진이라 gesture 이벤트가 발생함.
+// iOS 10부터는 user-scalable=no와 touch-action:none을 무시하고 두 손가락 핀치를 페이지 확대로 적용하며,
+// 확대 상태는 새로고침 후에도 탭에 유지되고 브라우저 재시작으로만 초기화되므로 이벤트 자체를 차단해야 함.
+['gesturestart', 'gesturechange', 'gestureend'].forEach((name) => {
+    document.addEventListener(name, (e) => e.preventDefault(), { passive: false });
+});
+
+// 브라우저별 전체화면 진입 (Chrome/Edge: 표준 API, iPad Safari: webkit 접두사 API)
+function requestGameFullscreen() {
+    const el = document.documentElement;
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (!fn) return;
+    try {
+        const p = fn.call(el);
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (err) {}
+}
+
+// 🌟 메타버스 접속번호: index.html과 같은 폴더의 code.txt (4자리). http로 열어야 읽힘
+let metaAccessCode = null;
+fetch('code.txt').then((r) => {
+    if (!r.ok) throw new Error('no code file');
+    return r.text();
+}).then((t) => {
+    const c = String(t || '').trim();
+    if (/^\d{4}$/.test(c)) metaAccessCode = c;
+}).catch(() => {});
+
+function tryEnterGame() {
+    const inputName = usernameInput.value.trim();
+    // 🌟 이름 규칙: 한글·영문·숫자만 (공백·기호 불가)
+    if (!inputName || !/^[가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9]+$/.test(inputName)) {
+        usernameInput.classList.add('border-rose-500'); usernameInput.focus(); return;
+    }
+    // 🌟 중복 입장 방지: 버튼 연타·Enter 중복 시 animate 루프 2중 실행으로 이동 2배속되는 현상 차단
+    if (tryEnterGame.entered) return;
+    tryEnterGame.entered = true;
+    
+    // 메타버스: 이스터에그·저장/불러오기 없음 — 항상 일반 접속자 (안전모드 걷기+보기 전용)
+    steveName = inputName; isEasterEgg = false;
+    document.getElementById('ghost-toggle-btn').classList.add('hidden');
+    document.getElementById('summon-all-btn').classList.add('hidden');
+    document.getElementById('freeze-all-btn').classList.add('hidden');
+    ghostMode = false;
+
+    // 메타버스: 접속번호는 code.txt의 4자리와 일치해야 입장
+    const codeInput = document.getElementById('accesscode-input');
+    const codeVal = codeInput ? codeInput.value.trim() : '';
+    if (!/^\d{4}$/.test(codeVal) || metaAccessCode === null || codeVal !== metaAccessCode) {
+        if (codeInput) { codeInput.classList.add('border-rose-500'); codeInput.focus(); }
+        if (metaAccessCode === null) showToast('접속번호 파일(code.txt)을 읽지 못했습니다 (http로 접속하세요)');
+        tryEnterGame.entered = false;
+        return;
+    }
+    
+    sfx.init();
+    joinedCode = codeVal;
+    socket.emit('join-player', { name: steveName, isEasterEgg: isEasterEgg, token: playerToken, outfit: selectedOutfitId, code: joinedCode });
+    // 원본 입력값을 저장 — 15분 내 자동 재입장 시 이름 복원용
+    try { localStorage.setItem('ksmsPlayerSession', JSON.stringify({ name: inputName, at: Date.now() })); } catch (e) {}
+    hasJoined = true; joinedName = steveName; joinedIsEasterEgg = isEasterEgg; joinedOutfitId = selectedOutfitId; // 🌟 재연결 시 자동 재입장용
+    joinPositioned = false; // 입장 확정(join-accepted) 전까지 방송 중단
+    
+    document.getElementById('setup-modal').classList.add('hidden');
+    document.getElementById('game-container').classList.remove('hidden');
+
+    // 입장 버튼 클릭(사용자 제스처) 시점에 맞춰 자동 전체화면 진입 — 태블릿에서 브라우저 UI가 사라져 일반 게임처럼 보임
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) requestGameFullscreen();
+    
+    // 🌟 번호 거부 후 재입장 시 엔진·리스너 중복 초기화 방지
+    if (!isEngineInitialized) { initEngine(); setupEventListeners(); setupTouchControls(); }
+    selectHotbar(0);
+    // 🌟 번들 맵 적용 후 탈출 (맵 안에 파묻히면 블록 위로)
+    loadBundledMap().then(() => { liftCharacterOutOfBlocks(); });
+    
+    // 🌟 루프 중복 차단: 번호 거부 후 재입장해도 animate 2중 실행(이동 2배속) 안 됨
+    if (!animate.running) { animate.running = true; animate(); }
+    setTimeout(onWindowResize, 100); setTimeout(onWindowResize, 300);
+}
+
+const startBtn = document.getElementById('start-btn'), usernameInput = document.getElementById('username-input'), errorMsg = document.getElementById('error-msg');
+const accesscodeInput = document.getElementById('accesscode-input'), codeErrorMsg = document.getElementById('code-error-msg');
+try {
+    const savedCode = localStorage.getItem('ksmsAccessCode');
+    if (savedCode && accesscodeInput && !accesscodeInput.value) accesscodeInput.value = savedCode;
+} catch (e) {}
+usernameInput.addEventListener('input', () => { const v = usernameInput.value.trim(); if (/^[가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9]+$/.test(v)) { errorMsg.classList.add('hidden'); usernameInput.classList.remove('border-rose-500'); } });
+accesscodeInput.addEventListener('input', () => { codeErrorMsg.classList.add('hidden'); accesscodeInput.classList.remove('border-rose-500'); });
+startBtn.addEventListener('click', tryEnterGame); usernameInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryEnterGame(); });
+accesscodeInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryEnterGame(); });
+
+// 🌟 새로고침 재입장: 같은 기기에서 15분 이내에 입장한 적이 있으면 이름 입력 없이 자동 입장
+let savedSession = null;
+try { savedSession = JSON.parse(localStorage.getItem('ksmsPlayerSession') || 'null'); } catch (e) {}
+if (savedSession && savedSession.name) {
+    usernameInput.value = savedSession.name;
+    if (Date.now() - (savedSession.at || 0) < 15 * 60 * 1000) {
+        tryEnterGame();
+        usernameInput.blur();
+    }
+}
+</script>
+</body>
+</html>
