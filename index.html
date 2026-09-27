@@ -3176,8 +3176,7 @@ function tryEnterGame() {
     document.getElementById('setup-modal').classList.add('hidden');
     document.getElementById('game-container').classList.remove('hidden');
 
-    // 입장 버튼 클릭(사용자 제스처) 시점에 맞춰 자동 전체화면 진입 — 태블릿에서 브라우저 UI가 사라져 일반 게임처럼 보임
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) requestGameFullscreen();
+    // 전체화면은 상단바 버튼으로 수동 전환 (자동 전환 제거됨)
     
     // 🌟 번호 거부 후 재입장 시 엔진·리스너 중복 초기화 방지
     if (!isEngineInitialized) { initEngine(); setupEventListeners(); setupTouchControls(); }
